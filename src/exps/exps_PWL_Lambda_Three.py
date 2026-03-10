@@ -1,0 +1,414 @@
+# exps_PWL_Lambda_Three.py
+
+import ast
+import csv
+import copy
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import TensorDataset, DataLoader
+from sklearn.model_selection import KFold
+import optuna
+from schedulefree import AdamWScheduleFree
+from typing import Callable, Dict, List, Tuple, Any
+
+from src.MLP import StandardMLP
+from src.PWLNetwork import pwl_mono_reg
+
+from dataPreprocessing.loaders import (
+    load_abalone, load_auto_mpg, load_boston_housing,
+    load_compas, load_era, load_esl, load_heart,
+    load_lev, load_swd
+)
+
+from src.utils import (
+    write_results_to_csv,
+    count_parameters,
+    generate_layer_combinations,
+    monotonicity_check,
+    get_reordered_monotonic_indices
+)
+
+from src.exp_common import (
+    set_global_seed,
+    ensure_binary_labels,
+    fold_minmax_scale_X,
+    fold_standardize_y,
+    eval_for_early_stop,
+    eval_regression_raw_metrics,
+)
+
+GLOBAL_SEED = 42
+SEARCH_EPOCHS = 20
+FINAL_EPOCHS = 100
+N_SPLITS = 5
+N_TRIALS = 20
+PATIENCE = 10
+MAX_MONO_POINTS = 1000
+
+
+# =====================================================
+# Loader unification
+# =====================================================
+def load_full_dataset(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
+    out = loader()
+    if len(out) == 2:
+        return np.asarray(out[0]), np.asarray(out[1])
+    elif len(out) == 4:
+        X, y, X_test, y_test = out
+        X_full = np.vstack([X, X_test])
+        y_full = np.concatenate([y, y_test])
+        return np.asarray(X_full), np.asarray(y_full)
+    else:
+        raise ValueError("Unexpected loader output.")
+
+
+def get_task_type(loader: Callable) -> str:
+    regression_tasks = [
+        load_abalone, load_auto_mpg,
+        load_boston_housing, load_era,
+        load_esl, load_lev, load_swd
+    ]
+    return "regression" if loader in regression_tasks else "classification"
+
+
+def make_tensor_dataset(X, y, task_type):
+    if task_type == "classification":
+        y = ensure_binary_labels(y)
+
+    return TensorDataset(
+        torch.FloatTensor(X),
+        torch.FloatTensor(y).reshape(-1, 1)
+    )
+
+
+# =====================================================
+# Model
+# =====================================================
+def create_model(config: Dict, input_size: int, seed: int):
+    torch.manual_seed(seed)
+
+    hidden_sizes = config["hidden_sizes"]
+    if isinstance(hidden_sizes, str):
+        hidden_sizes = ast.literal_eval(hidden_sizes)
+
+    return StandardMLP(
+        input_size=input_size,
+        hidden_sizes=hidden_sizes,
+        output_size=1,
+        activation=nn.ReLU(),
+        output_activation=nn.Identity()
+    )
+
+
+# =====================================================
+# Monotonicity safe wrapper
+# =====================================================
+def sample_random_in_domain(X_ref, n_points, seed, device):
+    rng = np.random.RandomState(seed)
+    x_min = np.nanmin(X_ref, axis=0)
+    x_max = np.nanmax(X_ref, axis=0)
+    span = x_max - x_min
+    span[span == 0] = 1.0
+    X_rand = x_min + rng.rand(n_points, X_ref.shape[1]) * span
+    return torch.FloatTensor(X_rand).to(device)
+
+
+def safe_monotonicity_check(model, optimizer, data_tensor, mono_idx, device):
+    model_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    opt_state = copy.deepcopy(optimizer.state_dict())
+
+    try:
+        score = monotonicity_check(model, optimizer, data_tensor, mono_idx, device)
+    finally:
+        model.load_state_dict(model_state, strict=True)
+        optimizer.load_state_dict(opt_state)
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.to(device)
+
+    return float(score)
+
+
+# =====================================================
+# Training
+# =====================================================
+def train_model(model, optimizer, train_loader, val_loader,
+                config, task_type, device, mono_idx):
+    criterion = nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
+
+    best_val = float("inf")
+    counter = 0
+    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+    for _ in range(config["epochs"]):
+
+        model.train()
+        if hasattr(optimizer, "train"):
+            optimizer.train()
+
+        for Xb, yb in train_loader:
+            Xb, yb = Xb.to(device), yb.to(device)
+
+            def closure():
+                optimizer.zero_grad()
+
+                out = model(Xb)
+                empirical = criterion(out, yb)
+
+                if len(mono_idx) == 0:
+                    mono_loss = torch.zeros((), device=device)
+                else:
+                    mono_loss = pwl_mono_reg(
+                        model,
+                        Xb,
+                        mono_idx,
+                        float(config["offset"])
+                    )
+
+                loss = empirical + float(config["monotonicity_weight"]) * mono_loss
+                loss.backward()
+                return loss
+
+            optimizer.step(closure)
+
+        val_metric = eval_for_early_stop(model, val_loader, task_type, device)
+
+        if val_metric < best_val:
+            best_val = val_metric
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            counter = 0
+        else:
+            counter += 1
+
+        if counter >= PATIENCE:
+            break
+
+    model.load_state_dict(best_state)
+    return float(best_val)
+
+
+# =====================================================
+# Optuna (Lambda fixed by external loop)
+# =====================================================
+def objective(trial, X_full, y_full, task_type, mono_idx, fixed_lambda):
+    hidden_options = generate_layer_combinations(2, 2, [8, 16, 32, 64])
+
+    config = {
+        "lr": trial.suggest_float("lr", 1e-3, 1e-1, log=True),
+        "hidden_sizes": trial.suggest_categorical("hidden_sizes", hidden_options),
+        "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
+        "monotonicity_weight": fixed_lambda,  # ✅ Lambda fixed from external loop
+        "offset": trial.suggest_float("offset", 0.0, 0.5, step=0.05),
+        "epochs": SEARCH_EPOCHS,
+    }
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_global_seed(GLOBAL_SEED)
+
+    idx = np.arange(len(X_full))
+    rng = np.random.RandomState(GLOBAL_SEED)
+    rng.shuffle(idx)
+
+    split = int(0.8 * len(idx))
+    tr_idx, va_idx = idx[:split], idx[split:]
+
+    X_tr, X_va = X_full[tr_idx], X_full[va_idx]
+    y_tr, y_va = y_full[tr_idx], y_full[va_idx]
+
+    X_tr, X_va = fold_minmax_scale_X(X_tr, X_va)
+    y_tr, y_va, _, _ = fold_standardize_y(y_tr, y_va, task_type)
+
+    train_loader = DataLoader(
+        make_tensor_dataset(X_tr, y_tr, task_type),
+        batch_size=config["batch_size"],
+        shuffle=True,
+        generator=torch.Generator().manual_seed(GLOBAL_SEED)
+    )
+
+    val_loader = DataLoader(
+        make_tensor_dataset(X_va, y_va, task_type),
+        batch_size=config["batch_size"]
+    )
+
+    model = create_model(config, X_full.shape[1], GLOBAL_SEED).to(device)
+    optimizer = AdamWScheduleFree(model.parameters(), lr=config["lr"], warmup_steps=5)
+
+    return train_model(model, optimizer, train_loader, val_loader,
+                       config, task_type, device, mono_idx)
+
+
+def optimize_hyperparameters(X, y, task_type, mono_idx, fixed_lambda):
+    study = optuna.create_study(direction="minimize",
+                                sampler=optuna.samplers.TPESampler(seed=GLOBAL_SEED))
+
+    study.optimize(lambda trial: objective(trial, X, y, task_type, mono_idx, fixed_lambda),
+                   n_trials=N_TRIALS, n_jobs=1)
+
+    best = study.best_params
+    if isinstance(best["hidden_sizes"], str):
+        best["hidden_sizes"] = ast.literal_eval(best["hidden_sizes"])
+    best["monotonicity_weight"] = fixed_lambda
+    best["epochs"] = FINAL_EPOCHS
+    return best
+
+
+# =====================================================
+# Cross Validation (FULLY UNIFIED)
+# =====================================================
+def cross_validate(X, y, best_config, task_type, mono_idx):
+    kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=GLOBAL_SEED)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    rmse_list, nrmse_list = [], []
+    err_list = []
+    mono_collect = {"random": [], "train": [], "val": []}
+
+    tmp_model = create_model(best_config, X.shape[1], GLOBAL_SEED).to(device)
+    n_params = int(count_parameters(tmp_model))
+    del tmp_model
+
+    for fold, (tr_idx, va_idx) in enumerate(kf.split(X)):
+
+        set_global_seed(GLOBAL_SEED + fold)
+
+        X_tr, X_va = X[tr_idx], X[va_idx]
+        y_tr, y_va = y[tr_idx], y[va_idx]
+
+        X_tr, X_va = fold_minmax_scale_X(X_tr, X_va)
+        y_tr, y_va, y_mean, y_std = fold_standardize_y(y_tr, y_va, task_type)
+
+        g = torch.Generator().manual_seed(GLOBAL_SEED + fold)
+
+        train_loader = DataLoader(
+            make_tensor_dataset(X_tr, y_tr, task_type),
+            batch_size=best_config["batch_size"],
+            shuffle=True,
+            generator=g
+        )
+
+        val_loader = DataLoader(
+            make_tensor_dataset(X_va, y_va, task_type),
+            batch_size=best_config["batch_size"]
+        )
+
+        model = create_model(best_config, X.shape[1], GLOBAL_SEED + fold).to(device)
+        optimizer = AdamWScheduleFree(model.parameters(), lr=best_config["lr"], warmup_steps=5)
+
+        train_model(model, optimizer, train_loader, val_loader,
+                    best_config, task_type, device, mono_idx)
+
+        if task_type == "regression":
+            rmse, nrmse = eval_regression_raw_metrics(model, val_loader, device, y_mean, y_std)
+            rmse_list.append(float(rmse))
+            nrmse_list.append(float(nrmse))
+        else:
+            err = eval_for_early_stop(model, val_loader, task_type, device)
+            err_list.append(float(err))
+
+        # monotonicity
+        n_points = min(MAX_MONO_POINTS, len(X_tr), len(X_va))
+        if len(mono_idx) == 0 or n_points <= 1:
+            for k in mono_collect:
+                mono_collect[k].append(0.0)
+            continue
+
+        rng = np.random.RandomState(GLOBAL_SEED + fold)
+        tr_sample_idx = rng.choice(len(X_tr), n_points, replace=False)
+        va_sample_idx = rng.choice(len(X_va), n_points, replace=False)
+
+        train_sample = torch.FloatTensor(X_tr[tr_sample_idx]).to(device)
+        val_sample = torch.FloatTensor(X_va[va_sample_idx]).to(device)
+        rand_sample = sample_random_in_domain(X_tr, n_points, GLOBAL_SEED + fold, device)
+
+        mono_collect["random"].append(safe_monotonicity_check(model, optimizer, rand_sample, mono_idx, device))
+        mono_collect["train"].append(safe_monotonicity_check(model, optimizer, train_sample, mono_idx, device))
+        mono_collect["val"].append(safe_monotonicity_check(model, optimizer, val_sample, mono_idx, device))
+
+    avg_mono = {k: (float(np.mean(v)), float(np.std(v))) for k, v in mono_collect.items()}
+
+    if task_type == "regression":
+        return rmse_list, nrmse_list, avg_mono, n_params
+    else:
+        return err_list, None, avg_mono, n_params
+
+
+# =====================================================
+# Main (Sweep Lambda and generate 15 CSVs)
+# =====================================================
+def main():
+    set_global_seed(GLOBAL_SEED)
+
+    dataset_loaders = [
+        load_abalone, load_auto_mpg,
+        load_boston_housing, load_compas,
+        load_era, load_esl, load_heart,
+        load_lev, load_swd
+    ]
+
+    lambda_list = [1.0, 10.0, 100.0, 1000.0, 10000.0]
+
+    for l_idx, lambd in enumerate(lambda_list):
+        # 定义当前 Lambda 下的三个 CSV 文件名
+        csv_files = {
+            "random": f"exps_PWL_lambda_random_10.{l_idx}.csv",
+            "val": f"exps_PWL_lambda_validation_10.{l_idx}.csv",
+            "train": f"exps_PWL_lambda_train_10.{l_idx}.csv"
+        }
+
+        # 初始化所有 CSV 文件
+        header = ["Dataset", "Task Type", "Metric Name", "Metric Mean", "Metric Std",
+                  "NumOfParameters", "Best Configuration",
+                  "Mono Random Mean", "Mono Random Std",
+                  "Mono Train Mean", "Mono Train Std",
+                  "Mono Val Mean", "Mono Val Std"]
+
+        for f_name in csv_files.values():
+            with open(f_name, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+
+        print(f"\n--- Starting Lambda Sweep: {lambd} (Index 10.{l_idx}) ---")
+
+        for loader in dataset_loaders:
+            print(f"Processing: {loader.__name__}")
+
+            X, y = load_full_dataset(loader)
+            task_type = get_task_type(loader)
+            mono_idx = get_reordered_monotonic_indices(loader.__name__)
+
+            # 超参数优化（固定当前 Lambda）
+            best_config = optimize_hyperparameters(X, y, task_type, mono_idx, lambd)
+
+            # 交叉验证
+            scores, nrmse_scores, mono_metrics, n_params = cross_validate(X, y, best_config, task_type, mono_idx)
+
+            # 指标确定
+            if task_type == "regression":
+                metric_name = "NRMSE"
+                perf_mean, perf_std = np.mean(nrmse_scores), np.std(nrmse_scores)
+            else:
+                metric_name = "Error Rate"
+                perf_mean, perf_std = np.mean(scores), np.std(scores)
+
+            # 分别写入三个 CSV 对应的数据
+            # 每个 CSV 实际上包含相同性能数据，但文件名不同以便于您区分汇总
+            for m_type, f_name in csv_files.items():
+                write_results_to_csv(
+                    filename=f_name,
+                    dataset_name=loader.__name__,
+                    task_type=task_type,
+                    metric_name=metric_name,
+                    metric_mean=perf_mean,
+                    metric_std=perf_std,
+                    n_params=n_params,
+                    best_config=best_config,
+                    mono_metrics=mono_metrics
+                )
+
+        print(f"--- Finished Lambda {lambd} ---")
+
+
+if __name__ == "__main__":
+    main()

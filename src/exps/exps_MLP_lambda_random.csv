@@ -1,0 +1,10 @@
+Dataset,Metric,MLP_Baseline
+load_abalone,random,0.9677
+load_auto_mpg,random,0.9974
+load_boston_housing,random,0.3307
+load_compas,random,0.5696
+load_era,random,0.1850
+load_esl,random,0.0962
+load_heart,random,0.9142
+load_lev,random,0.0100
+load_swd,random,0.6950

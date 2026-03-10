@@ -1,0 +1,10 @@
+Dataset,Task Type,Metric Name,Metric Mean,Metric Std,NumOfParameters,Best Configuration,Mono Random Mean,Mono Random Std,Mono Train Mean,Mono Train Std,Mono Val Mean,Mono Val Std
+load_abalone,regression,NRMSE,0.1023,0.0109,289,"{""lr"": 0.09654910008354704, ""K"": 4, ""h_K"": 8, ""batch_size"": 32, ""beta"": 1.2635948024354196, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_auto_mpg,regression,NRMSE,0.0864,0.0084,321,"{""lr"": 0.09744665050025668, ""K"": 5, ""h_K"": 8, ""batch_size"": 16, ""beta"": 3.369503491345312, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_boston_housing,regression,NRMSE,0.0763,0.0090,449,"{""lr"": 0.09654910008354704, ""K"": 4, ""h_K"": 8, ""batch_size"": 32, ""beta"": 1.2635948024354196, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_compas,classification,Error Rate,0.3135,0.0134,2561,"{""lr"": 0.051853999602662654, ""K"": 5, ""h_K"": 64, ""batch_size"": 64, ""beta"": 0.4402065263087206, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_era,regression,NRMSE,0.1931,0.0084,1601,"{""lr"": 0.053390375621314164, ""K"": 5, ""h_K"": 64, ""batch_size"": 32, ""beta"": 1.0466621247812486, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_esl,regression,NRMSE,0.0763,0.0063,201,"{""lr"": 0.09728804818649303, ""K"": 5, ""h_K"": 8, ""batch_size"": 16, ""beta"": 4.532971317379211, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_heart,classification,Error Rate,0.1518,0.0220,337,"{""lr"": 0.09780702136433819, ""K"": 3, ""h_K"": 8, ""batch_size"": 32, ""beta"": 1.3825316041820828, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_lev,regression,NRMSE,0.1577,0.0084,161,"{""lr"": 0.09654910008354704, ""K"": 4, ""h_K"": 8, ""batch_size"": 32, ""beta"": 1.2635948024354196, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000
+load_swd,regression,NRMSE,0.2058,0.0122,353,"{""lr"": 0.09654910008354704, ""K"": 4, ""h_K"": 8, ""batch_size"": 32, ""beta"": 1.2635948024354196, ""epochs"": 100}",0.0000,0.0000,0.0000,0.0000,0.0000,0.0000

@@ -1,0 +1,550 @@
+# exps_UMNN.py
+
+import ast
+import csv
+import copy
+from typing import Callable, Dict, Any, Tuple
+
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import TensorDataset, DataLoader
+from sklearn.model_selection import KFold
+import optuna
+from schedulefree import AdamWScheduleFree
+
+from src.UMNNModel import UMNNModel
+
+from dataPreprocessing.loaders import (
+    load_abalone, load_auto_mpg,
+    load_boston_housing, load_compas,
+    load_era, load_esl, load_heart,
+    load_lev, load_swd
+)
+
+from src.utils import (
+    write_results_to_csv,
+    count_parameters,
+    generate_layer_combinations,
+    monotonicity_check,
+    get_reordered_monotonic_indices
+)
+
+from src.exp_common import (
+    set_global_seed,
+    ensure_binary_labels,
+    fold_minmax_scale_X,
+    fold_standardize_y,
+    eval_for_early_stop,
+    eval_regression_raw_metrics,
+)
+
+GLOBAL_SEED = 42
+SEARCH_EPOCHS = 20
+FINAL_EPOCHS = 100
+N_TRIALS = 20
+N_SPLITS = 5
+MAX_MONO_POINTS = 1000
+
+
+# =====================================================
+# Task Type
+# =====================================================
+def get_task_type(loader: Callable) -> str:
+    regression_tasks = [
+        load_abalone, load_auto_mpg,
+        load_boston_housing, load_era,
+        load_esl, load_lev, load_swd
+    ]
+    return "regression" if loader in regression_tasks else "classification"
+
+
+# =====================================================
+# Dataset builder
+# =====================================================
+def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
+    if task_type == "classification":
+        y = ensure_binary_labels(y)
+
+    X_t = torch.FloatTensor(np.asarray(X, dtype=np.float32))
+    y_t = torch.FloatTensor(np.asarray(y, dtype=np.float32)).reshape(-1, 1)
+    return TensorDataset(X_t, y_t)
+
+
+# =====================================================
+# Random sampling for monotonicity check (in domain)
+# =====================================================
+def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device: torch.device) -> torch.Tensor:
+    rng = np.random.RandomState(seed)
+    X_ref = np.asarray(X_ref)
+
+    x_min = np.nanmin(X_ref, axis=0)
+    x_max = np.nanmax(X_ref, axis=0)
+    span = x_max - x_min
+    span[span == 0] = 1.0
+
+    u = rng.rand(n_points, X_ref.shape[1])
+    X_rand = x_min + u * span
+    return torch.FloatTensor(X_rand).to(device)
+
+
+# =====================================================
+# Safe monotonicity wrapper (avoid polluting optimizer/model)
+# =====================================================
+def safe_monotonicity_check(
+    model: nn.Module,
+    optimizer,
+    data_tensor: torch.Tensor,
+    monotonic_indices,
+    device: torch.device
+) -> float:
+    model_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    opt_state = copy.deepcopy(optimizer.state_dict())
+
+    try:
+        score = monotonicity_check(model, optimizer, data_tensor, monotonic_indices, device)
+    finally:
+        model.load_state_dict(model_state, strict=True)
+        optimizer.load_state_dict(opt_state)
+        # move optimizer tensors back to device
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.to(device)
+
+    return float(score)
+
+
+# =====================================================
+# Device chooser with auto-fallback
+# =====================================================
+def pick_device(prefer_cuda: bool = True) -> torch.device:
+    if prefer_cuda and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+# =====================================================
+# Model factory
+# =====================================================
+def create_model(
+    config: Dict[str, Any],
+    input_size: int,
+    monotonic_indices,
+    seed: int,
+    device: torch.device
+) -> nn.Module:
+    torch.manual_seed(seed)
+
+    if len(monotonic_indices) == 0:
+        raise ValueError("[UMNN] monotonic_indices is empty. Check your loaders/reorder settings.")
+
+    mono_hidden = config["mono_hidden"]
+    nonmono_hidden = config["nonmono_hidden"]
+    if isinstance(mono_hidden, str):
+        mono_hidden = ast.literal_eval(mono_hidden)
+    if isinstance(nonmono_hidden, str):
+        nonmono_hidden = ast.literal_eval(nonmono_hidden)
+
+    model = UMNNModel(
+        input_size=input_size,
+        monotonic_indices=monotonic_indices,
+        mono_hidden_sizes=list(mono_hidden),
+        nonmono_hidden_sizes=list(nonmono_hidden),
+        n_integration_steps=int(config["integration_steps"]),
+        mono_activation=str(config.get("mono_activation", "tanh")),
+        nonmono_activation=str(config.get("nonmono_activation", "relu")),
+        output_size=1,
+    )
+    return model.to(device)
+
+
+# =====================================================
+# Training
+# =====================================================
+def get_criterion(task_type: str):
+    return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
+
+
+def train_model(
+    model: nn.Module,
+    optimizer,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    config: Dict[str, Any],
+    task_type: str,
+    device: torch.device
+) -> float:
+    criterion = get_criterion(task_type)
+
+    best_val = float("inf")
+    patience = 10
+    counter = 0
+    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+    for _ in range(int(config["epochs"])):
+
+        model.train()
+        if hasattr(optimizer, "train"):
+            optimizer.train()
+
+        for X_batch, y_batch in train_loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+
+            def closure():
+                optimizer.zero_grad()
+                out = model(X_batch)
+                loss = criterion(out, y_batch)
+                loss.backward()
+                return loss
+
+            optimizer.step(closure)
+
+        val_metric = eval_for_early_stop(model, val_loader, task_type, device)
+
+        if val_metric < best_val:
+            best_val = val_metric
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            counter = 0
+        else:
+            counter += 1
+
+        if counter >= patience:
+            break
+
+    model.load_state_dict(best_state)
+    return float(best_val)
+
+
+# =====================================================
+# GPU auto-fallback runner (objective/fold)
+# =====================================================
+def run_with_fallback(fn, prefer_cuda=True):
+    device = pick_device(prefer_cuda=prefer_cuda)
+    try:
+        return fn(device)
+    except RuntimeError as e:
+        msg = str(e).lower()
+        # common CUDA failures: OOM, cublas, device-side assert, etc.
+        if device.type == "cuda" and (
+            "out of memory" in msg
+            or "cublas" in msg
+            or "cuda" in msg
+            or "device-side assert" in msg
+        ):
+            torch.cuda.empty_cache()
+            cpu_device = torch.device("cpu")
+            return fn(cpu_device)
+        raise
+
+
+# =====================================================
+# Optuna objective (fixed 80/20 split + fold-style preprocessing)
+# =====================================================
+def objective(
+    trial,
+    X_full: np.ndarray,
+    y_full: np.ndarray,
+    task_type: str,
+    monotonic_indices
+) -> float:
+
+    hidden_options_mono = generate_layer_combinations(
+        min_layers=1, max_layers=2, units=[8, 16, 32, 64]
+    )
+    hidden_options_non = generate_layer_combinations(
+        min_layers=1, max_layers=2, units=[8, 16, 32, 64]
+    )
+
+    config: Dict[str, Any] = {
+        "lr": trial.suggest_float("lr", 1e-3, 1e-1, log=True),
+        "integration_steps": trial.suggest_int("integration_steps", 10, 40),
+        "mono_hidden": trial.suggest_categorical("mono_hidden", hidden_options_mono),
+        "nonmono_hidden": trial.suggest_categorical("nonmono_hidden", hidden_options_non),
+        "mono_activation": trial.suggest_categorical("mono_activation", ["tanh"]),
+        "nonmono_activation": trial.suggest_categorical("nonmono_activation", ["relu"]),
+        "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
+        "epochs": SEARCH_EPOCHS,
+    }
+
+    set_global_seed(GLOBAL_SEED)
+
+    if task_type == "classification":
+        y_full = ensure_binary_labels(y_full)
+
+    n = len(X_full)
+    idx = np.arange(n)
+    rng = np.random.RandomState(GLOBAL_SEED)
+    rng.shuffle(idx)
+
+    split = int(0.8 * n)
+    tr_idx, va_idx = idx[:split], idx[split:]
+
+    X_tr, X_va = X_full[tr_idx], X_full[va_idx]
+    y_tr, y_va = y_full[tr_idx], y_full[va_idx]
+
+    X_tr, X_va = fold_minmax_scale_X(X_tr, X_va)
+    y_tr, y_va, _, _ = fold_standardize_y(y_tr, y_va, task_type)
+
+    train_ds = make_tensor_dataset(X_tr, y_tr, task_type)
+    val_ds = make_tensor_dataset(X_va, y_va, task_type)
+
+    g = torch.Generator().manual_seed(GLOBAL_SEED)
+
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=int(config["batch_size"]),
+        shuffle=True,
+        generator=g
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=int(config["batch_size"]),
+        shuffle=False
+    )
+
+    def _run(device: torch.device) -> float:
+        model = create_model(
+            config=config,
+            input_size=X_full.shape[1],
+            monotonic_indices=monotonic_indices,
+            seed=GLOBAL_SEED,
+            device=device
+        )
+
+        optimizer = AdamWScheduleFree(
+            model.parameters(),
+            lr=float(config["lr"]),
+            warmup_steps=5
+        )
+
+        return train_model(model, optimizer, train_loader, val_loader, config, task_type, device)
+
+    return float(run_with_fallback(_run, prefer_cuda=True))
+
+
+def optimize_hyperparameters(
+    X: np.ndarray,
+    y: np.ndarray,
+    task_type: str,
+    monotonic_indices,
+    n_trials: int = N_TRIALS
+) -> Dict[str, Any]:
+
+    study = optuna.create_study(
+        direction="minimize",
+        sampler=optuna.samplers.TPESampler(seed=GLOBAL_SEED)
+    )
+
+    study.optimize(
+        lambda trial: objective(trial, X, y, task_type, monotonic_indices),
+        n_trials=n_trials,
+        n_jobs=1,
+        show_progress_bar=True
+    )
+
+    best = dict(study.best_params)
+    best["epochs"] = FINAL_EPOCHS
+    return best
+
+
+# =====================================================
+# Cross validation (aligned with other methods)
+# =====================================================
+def cross_validate(
+    X: np.ndarray,
+    y: np.ndarray,
+    best_config: Dict[str, Any],
+    task_type: str,
+    monotonic_indices,
+    n_splits: int = N_SPLITS
+) -> Tuple[list, Any, Dict[str, Tuple[float, float]], int]:
+
+    if task_type == "classification":
+        y = ensure_binary_labels(y)
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=GLOBAL_SEED)
+
+    if task_type == "regression":
+        rmse_list, nrmse_list = [], []
+    else:
+        err_list = []
+
+    mono_collect = {"random": [], "train": [], "val": []}
+    n_params = None
+
+    for fold, (tr_idx, va_idx) in enumerate(kf.split(X)):
+
+        set_global_seed(GLOBAL_SEED + fold)
+
+        X_train, X_val = X[tr_idx], X[va_idx]
+        y_train, y_val = y[tr_idx], y[va_idx]
+
+        X_train, X_val = fold_minmax_scale_X(X_train, X_val)
+        y_train, y_val, y_mean, y_std = fold_standardize_y(y_train, y_val, task_type)
+
+        g = torch.Generator().manual_seed(GLOBAL_SEED + fold)
+
+        train_loader = DataLoader(
+            make_tensor_dataset(X_train, y_train, task_type),
+            batch_size=int(best_config["batch_size"]),
+            shuffle=True,
+            generator=g
+        )
+        val_loader = DataLoader(
+            make_tensor_dataset(X_val, y_val, task_type),
+            batch_size=int(best_config["batch_size"]),
+            shuffle=False
+        )
+
+        # build model with fallback
+        def _build(device: torch.device):
+            model = create_model(
+                config=best_config,
+                input_size=X.shape[1],
+                monotonic_indices=monotonic_indices,
+                seed=GLOBAL_SEED + fold,
+                device=device
+            )
+            optimizer = AdamWScheduleFree(
+                model.parameters(),
+                lr=float(best_config["lr"]),
+                warmup_steps=5
+            )
+            return model, optimizer, device
+
+        model, optimizer, device = run_with_fallback(_build, prefer_cuda=True)
+
+        if n_params is None:
+            n_params = count_parameters(model)
+
+        train_model(model, optimizer, train_loader, val_loader, best_config, task_type, device)
+
+        # ---- performance ----
+        if task_type == "regression":
+            rmse_raw, nrmse = eval_regression_raw_metrics(model, val_loader, device, y_mean, y_std)
+            rmse_list.append(float(rmse_raw))
+            nrmse_list.append(float(nrmse))
+        else:
+            err = eval_for_early_stop(model, val_loader, task_type, device)
+            err_list.append(float(err))
+
+        # ---- monotonicity ----
+        if not monotonic_indices:
+            mono_collect["random"].append(0.0)
+            mono_collect["train"].append(0.0)
+            mono_collect["val"].append(0.0)
+        else:
+            n_points = min(MAX_MONO_POINTS, len(X_train), len(X_val))
+
+            # 你要求的：如果 n_points <= 1 直接跳过
+            if n_points <= 1:
+                continue
+
+            rng = np.random.RandomState(GLOBAL_SEED + fold)
+            tr_s = rng.choice(len(X_train), n_points, replace=False)
+            va_s = rng.choice(len(X_val), n_points, replace=False)
+
+            train_sample = torch.FloatTensor(X_train[tr_s]).to(device)
+            val_sample = torch.FloatTensor(X_val[va_s]).to(device)
+            rand_sample = sample_random_in_domain(X_train, n_points, GLOBAL_SEED + fold, device)
+
+            mono_collect["random"].append(
+                safe_monotonicity_check(model, optimizer, rand_sample, monotonic_indices, device)
+            )
+            mono_collect["train"].append(
+                safe_monotonicity_check(model, optimizer, train_sample, monotonic_indices, device)
+            )
+            mono_collect["val"].append(
+                safe_monotonicity_check(model, optimizer, val_sample, monotonic_indices, device)
+            )
+
+    avg_mono = {k: (float(np.mean(v)), float(np.std(v))) if len(v) > 0 else (0.0, 0.0)
+                for k, v in mono_collect.items()}
+
+    if task_type == "regression":
+        return rmse_list, nrmse_list, avg_mono, int(n_params or 0)
+    return err_list, None, avg_mono, int(n_params or 0)
+
+
+# =====================================================
+# Main
+# =====================================================
+def process_dataset(loader: Callable):
+    X, y = loader()
+    task_type = get_task_type(loader)
+    monotonic_indices = get_reordered_monotonic_indices(loader.__name__)
+
+    best_config = optimize_hyperparameters(X, y, task_type, monotonic_indices, n_trials=N_TRIALS)
+
+    scores, nrmse_scores, mono_metrics, n_params = cross_validate(
+        X, y, best_config, task_type, monotonic_indices, n_splits=N_SPLITS
+    )
+
+    return scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
+
+
+def main():
+    set_global_seed(GLOBAL_SEED)
+
+    dataset_loaders = [
+        load_abalone, load_auto_mpg,
+        load_boston_housing, load_compas,
+        load_era, load_esl, load_heart,
+        load_lev, load_swd
+    ]
+
+    # ✅ 确保文件名对应模型
+    results_file = "exps_UMNN.csv"
+
+    # 1. 写入符合要求的统一表头
+    with open(results_file, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "Dataset", "Task Type", "Metric Name",
+            "Metric Mean", "Metric Std",
+            "NumOfParameters", "Best Configuration",
+            "Mono Random Mean", "Mono Random Std",
+            "Mono Train Mean", "Mono Train Std",
+            "Mono Val Mean", "Mono Val Std"
+        ])
+
+    for loader in dataset_loaders:
+        print(f"\nProcessing dataset: {loader.__name__} with UMNN...")
+
+        # 获取实验结果
+        # UMNN 的 process_dataset 返回顺序: scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
+        scores, nrmse_scores, mono_metrics, best_config, n_params, task_type = process_dataset(loader)
+
+        # 2. 核心逻辑分支：根据任务类型选择最终输出的指标
+        if task_type == "regression":
+            metric_name = "NRMSE"
+            # 统一使用 NRMSE 作为回归的主指标
+            final_mean = float(np.mean(nrmse_scores))
+            final_std = float(np.std(nrmse_scores))
+        else:
+            metric_name = "Error Rate"
+            # 分类任务使用错误率
+            final_mean = float(np.mean(scores))
+            final_std = float(np.std(scores))
+
+        # 3. 调用统一后的写入函数（参数列表已根据新的 utils.py 简化）
+        write_results_to_csv(
+            filename=results_file,
+            dataset_name=loader.__name__,
+            task_type=task_type,
+            metric_name=metric_name,
+            metric_mean=final_mean,
+            metric_std=final_std,
+            n_params=n_params,
+            best_config=best_config,
+            mono_metrics=mono_metrics
+        )
+
+        # 终端实时查看进度
+        print(f"{loader.__name__} | {metric_name}: {final_mean:.4f} ± {final_std:.4f}")
+
+
+if __name__ == "__main__":
+    main()

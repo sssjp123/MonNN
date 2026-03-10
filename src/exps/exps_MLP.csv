@@ -1,0 +1,10 @@
+Dataset,Task Type,Metric Name,Metric Mean,Metric Std,NumOfParameters,Best Configuration,Mono Random Mean,Mono Random Std,Mono Train Mean,Mono Train Std,Mono Val Mean,Mono Val Std
+load_abalone,regression,NRMSE,0.0928,0.0092,433,"{""lr"": 0.029978582191230507, ""hidden_sizes"": [16, 16], ""batch_size"": 16, ""epochs"": 100}",0.9677,0.0483,0.9875,0.0124,0.9919,0.0099
+load_auto_mpg,regression,NRMSE,0.0829,0.0107,705,"{""lr"": 0.010124137770478638, ""hidden_sizes"": [16, 32], ""batch_size"": 32, ""epochs"": 100}",0.9974,0.0051,1.0000,0.0000,1.0000,0.0000
+load_boston_housing,regression,NRMSE,0.0754,0.0119,3009,"{""lr"": 0.019480005358814716, ""hidden_sizes"": [64, 32], ""batch_size"": 64, ""epochs"": 100}",0.3307,0.2289,0.3228,0.2814,0.3287,0.2736
+load_compas,classification,Error Rate,0.3087,0.0112,225,"{""lr"": 0.020490232894503684, ""hidden_sizes"": [8, 16], ""batch_size"": 16, ""epochs"": 100}",0.5696,0.4501,0.5498,0.2985,0.5618,0.2970
+load_era,regression,NRMSE,0.1946,0.0081,4545,"{""lr"": 0.034982273006754806, ""hidden_sizes"": [64, 64], ""batch_size"": 64, ""epochs"": 100}",0.1850,0.1174,0.1530,0.0913,0.1380,0.1000
+load_esl,regression,NRMSE,0.0769,0.0051,4545,"{""lr"": 0.05427870037773274, ""hidden_sizes"": [64, 64], ""batch_size"": 16, ""epochs"": 100}",0.0962,0.0994,0.0164,0.0229,0.0143,0.0104
+load_heart,classification,Error Rate,0.1883,0.0429,1425,"{""lr"": 0.0019010245319870357, ""hidden_sizes"": [64, 8], ""batch_size"": 16, ""epochs"": 100}",0.9142,0.0997,0.9704,0.0445,0.9671,0.0508
+load_lev,regression,NRMSE,0.1574,0.0082,657,"{""lr"": 0.007392160555758584, ""hidden_sizes"": [16, 32], ""batch_size"": 128, ""epochs"": 100}",0.0100,0.0055,0.0140,0.0208,0.0170,0.0196
+load_swd,regression,NRMSE,0.2057,0.0122,169,"{""lr"": 0.025953772947620368, ""hidden_sizes"": [8, 8], ""batch_size"": 64, ""epochs"": 100}",0.6950,0.2074,0.7020,0.1842,0.6850,0.1724

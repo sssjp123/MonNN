@@ -1,0 +1,10 @@
+Dataset,Metric,MLP_Baseline
+load_abalone,validation,0.9919
+load_auto_mpg,validation,1.0000
+load_boston_housing,validation,0.3287
+load_compas,validation,0.5618
+load_era,validation,0.1380
+load_esl,validation,0.0143
+load_heart,validation,0.9671
+load_lev,validation,0.0170
+load_swd,validation,0.6850

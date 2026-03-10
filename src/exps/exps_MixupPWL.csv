@@ -1,0 +1,10 @@
+Dataset,Task Type,Metric Name,Metric Mean,Metric Std,NumOfParameters,Best Configuration,Mono Random Mean,Mono Random Std,Mono Train Mean,Mono Train Std,Mono Val Mean,Mono Val Std
+load_abalone,regression,NRMSE,0.0932,0.0091,4801,"{""lr"": 0.016382061352101022, ""hidden_sizes"": [64, 64], ""batch_size"": 16, ""monotonicity_weight"": 1.0, ""epochs"": 100}",0.9593,0.0336,0.9895,0.0096,0.9888,0.0077
+load_auto_mpg,regression,NRMSE,0.0772,0.0113,2625,"{""lr"": 0.025003322138425918, ""hidden_sizes"": [64, 32], ""batch_size"": 16, ""monotonicity_weight"": 10.0, ""epochs"": 100}",0.9923,0.0102,0.9923,0.0103,0.9897,0.0205
+load_boston_housing,regression,NRMSE,0.0828,0.0120,1425,"{""lr"": 0.028708753481954688, ""hidden_sizes"": [64, 8], ""batch_size"": 64, ""monotonicity_weight"": 1.0, ""epochs"": 100}",0.3426,0.3301,0.2356,0.2029,0.2554,0.2157
+load_compas,classification,Error Rate,0.3083,0.0123,529,"{""lr"": 0.037183641805732096, ""hidden_sizes"": [32, 8], ""batch_size"": 32, ""monotonicity_weight"": 100.0, ""epochs"": 100}",0.5108,0.3728,0.7892,0.3947,0.7890,0.3946
+load_era,regression,NRMSE,0.1940,0.0091,681,"{""lr"": 0.06554382343546285, ""hidden_sizes"": [8, 64], ""batch_size"": 128, ""monotonicity_weight"": 1000.0, ""epochs"": 100}",0.1310,0.0827,0.1180,0.1223,0.1050,0.1175
+load_esl,regression,NRMSE,0.0755,0.0063,4545,"{""lr"": 0.003921890776278095, ""hidden_sizes"": [64, 64], ""batch_size"": 16, ""monotonicity_weight"": 1.0, ""epochs"": 100}",0.1126,0.0483,0.0267,0.0191,0.0308,0.0292
+load_heart,classification,Error Rate,0.1321,0.0237,721,"{""lr"": 0.037183641805732096, ""hidden_sizes"": [32, 8], ""batch_size"": 32, ""monotonicity_weight"": 100.0, ""epochs"": 100}",0.0557,0.1115,0.1311,0.2623,0.1311,0.2623
+load_lev,regression,NRMSE,0.1584,0.0078,657,"{""lr"": 0.010247824343201806, ""hidden_sizes"": [16, 32], ""batch_size"": 128, ""monotonicity_weight"": 10.0, ""epochs"": 100}",0.0100,0.0130,0.0140,0.0208,0.0150,0.0167
+load_swd,regression,NRMSE,0.2046,0.0145,729,"{""lr"": 0.04180397272191577, ""hidden_sizes"": [8, 64], ""batch_size"": 32, ""monotonicity_weight"": 1000.0, ""epochs"": 100}",0.7490,0.2006,0.8070,0.1318,0.7890,0.1494
