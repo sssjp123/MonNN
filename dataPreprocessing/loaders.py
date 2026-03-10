@@ -3,23 +3,17 @@ import numpy as np
 import pandas as pd
 from typing import List, Optional, Callable
 
-# =========================================================
-# Path settings
-# =========================================================
 
+
+# Path settings
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(PROJECT_ROOT, "datasets")
 
-
 def get_data_path(filename: str) -> str:
     return os.path.join(DATA_DIR, filename)
 
-
-# =========================================================
 # Core loader
-# =========================================================
-
 def load_data(
     path: str,
     mono_inc_list: List[int],
@@ -28,11 +22,12 @@ def load_data(
     preprocess_func: Optional[Callable] = None,
     strict_mono_check: bool = True,
 ):
+
     """
     Generic data loading function with strict monotonic feature handling.
     """
 
-    # ---------- Load ----------
+    # Load
     data = pd.read_csv(get_data_path(path))
 
     if preprocess_func is not None:
@@ -40,15 +35,13 @@ def load_data(
 
     data = data.dropna()
 
-    # ---------- Split ----------
+    # Split features and target
     X = data.drop(columns=[target_column]).values.astype(np.float32)
     y = data[target_column].values
 
     d = X.shape[1]
 
-    # =====================================================
     # 1) Monotonic index validity check
-    # =====================================================
 
     bad_inc = [i for i in mono_inc_list if i < 0 or i >= d]
     bad_dec = [i for i in mono_dec_list if i < 0 or i >= d]
@@ -60,17 +53,13 @@ def load_data(
             f"Check preprocessing and monotonic index definitions."
         )
 
-    # =====================================================
-    # 2) Transform decreasing → increasing
-    # =====================================================
+    # 2) Transform decreasing to increasing
 
     for col in mono_dec_list:
         if 0 <= col < d:
             X[:, col] = -X[:, col]
 
-    # =====================================================
     # 3) Reorder features: monotonic first
-    # =====================================================
 
     mono_list = list(mono_inc_list) + list(mono_dec_list)
     mono_list = [i for i in mono_list if 0 <= i < d]
@@ -85,9 +74,7 @@ def load_data(
     new_order = mono_list + non_mono_list
     X = X[:, new_order]
 
-    # =====================================================
     # 4) Structural consistency check
-    # =====================================================
 
     if strict_mono_check:
         k = len(mono_list)
@@ -97,9 +84,7 @@ def load_data(
     return X, y
 
 
-# =========================================================
 # Preprocessing functions
-# =========================================================
 
 def preprocess_abalone(data):
     data = data.copy()
@@ -144,9 +129,7 @@ def preprocess_compas(data):
     return data
 
 
-# =========================================================
 # Dataset-specific loaders
-# =========================================================
 
 def load_abalone():
     return load_data(

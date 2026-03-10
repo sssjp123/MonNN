@@ -65,12 +65,6 @@ class HLLNetwork(nn.Module):
 
     @lru_cache(maxsize=None)
     def _build_model(self) -> HLattice:
-        """
-        Build the underlying HLattice model.
-
-        Returns:
-            HLattice: The constructed HLattice model.
-        """
         input_len = self.input_size - len(self.increasing)
         output_len = torch.prod(torch.tensor(self.lattice_sizes)).item()
 

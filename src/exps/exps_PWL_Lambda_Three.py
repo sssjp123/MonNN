@@ -47,9 +47,7 @@ PATIENCE = 10
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
 # Loader unification
-# =====================================================
 def load_full_dataset(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
     out = loader()
     if len(out) == 2:
@@ -82,9 +80,7 @@ def make_tensor_dataset(X, y, task_type):
     )
 
 
-# =====================================================
 # Model
-# =====================================================
 def create_model(config: Dict, input_size: int, seed: int):
     torch.manual_seed(seed)
 
@@ -101,9 +97,8 @@ def create_model(config: Dict, input_size: int, seed: int):
     )
 
 
-# =====================================================
-# Monotonicity safe wrapper
-# =====================================================
+
+# Monotonicity
 def sample_random_in_domain(X_ref, n_points, seed, device):
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -131,9 +126,7 @@ def safe_monotonicity_check(model, optimizer, data_tensor, mono_idx, device):
     return float(score)
 
 
-# =====================================================
 # Training
-# =====================================================
 def train_model(model, optimizer, train_loader, val_loader,
                 config, task_type, device, mono_idx):
     criterion = nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
@@ -189,9 +182,7 @@ def train_model(model, optimizer, train_loader, val_loader,
     return float(best_val)
 
 
-# =====================================================
 # Optuna (Lambda fixed by external loop)
-# =====================================================
 def objective(trial, X_full, y_full, task_type, mono_idx, fixed_lambda):
     hidden_options = generate_layer_combinations(2, 2, [8, 16, 32, 64])
 
@@ -199,7 +190,7 @@ def objective(trial, X_full, y_full, task_type, mono_idx, fixed_lambda):
         "lr": trial.suggest_float("lr", 1e-3, 1e-1, log=True),
         "hidden_sizes": trial.suggest_categorical("hidden_sizes", hidden_options),
         "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
-        "monotonicity_weight": fixed_lambda,  # ✅ Lambda fixed from external loop
+        "monotonicity_weight": fixed_lambda,
         "offset": trial.suggest_float("offset", 0.0, 0.5, step=0.05),
         "epochs": SEARCH_EPOCHS,
     }
@@ -254,9 +245,8 @@ def optimize_hyperparameters(X, y, task_type, mono_idx, fixed_lambda):
     return best
 
 
-# =====================================================
-# Cross Validation (FULLY UNIFIED)
-# =====================================================
+
+# Cross Validation
 def cross_validate(X, y, best_config, task_type, mono_idx):
     kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=GLOBAL_SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -307,7 +297,6 @@ def cross_validate(X, y, best_config, task_type, mono_idx):
             err = eval_for_early_stop(model, val_loader, task_type, device)
             err_list.append(float(err))
 
-        # monotonicity
         n_points = min(MAX_MONO_POINTS, len(X_tr), len(X_va))
         if len(mono_idx) == 0 or n_points <= 1:
             for k in mono_collect:
@@ -334,9 +323,7 @@ def cross_validate(X, y, best_config, task_type, mono_idx):
         return err_list, None, avg_mono, n_params
 
 
-# =====================================================
-# Main (Sweep Lambda and generate 15 CSVs)
-# =====================================================
+# Main
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -350,14 +337,14 @@ def main():
     lambda_list = [1.0, 10.0, 100.0, 1000.0, 10000.0]
 
     for l_idx, lambd in enumerate(lambda_list):
-        # 定义当前 Lambda 下的三个 CSV 文件名
+
         csv_files = {
             "random": f"exps_PWL_lambda_random_10.{l_idx}.csv",
             "val": f"exps_PWL_lambda_validation_10.{l_idx}.csv",
             "train": f"exps_PWL_lambda_train_10.{l_idx}.csv"
         }
 
-        # 初始化所有 CSV 文件
+
         header = ["Dataset", "Task Type", "Metric Name", "Metric Mean", "Metric Std",
                   "NumOfParameters", "Best Configuration",
                   "Mono Random Mean", "Mono Random Std",
@@ -378,13 +365,10 @@ def main():
             task_type = get_task_type(loader)
             mono_idx = get_reordered_monotonic_indices(loader.__name__)
 
-            # 超参数优化（固定当前 Lambda）
             best_config = optimize_hyperparameters(X, y, task_type, mono_idx, lambd)
 
-            # 交叉验证
             scores, nrmse_scores, mono_metrics, n_params = cross_validate(X, y, best_config, task_type, mono_idx)
 
-            # 指标确定
             if task_type == "regression":
                 metric_name = "NRMSE"
                 perf_mean, perf_std = np.mean(nrmse_scores), np.std(nrmse_scores)
@@ -392,8 +376,6 @@ def main():
                 metric_name = "Error Rate"
                 perf_mean, perf_std = np.mean(scores), np.std(scores)
 
-            # 分别写入三个 CSV 对应的数据
-            # 每个 CSV 实际上包含相同性能数据，但文件名不同以便于您区分汇总
             for m_type, f_name in csv_files.items():
                 write_results_to_csv(
                     filename=f_name,

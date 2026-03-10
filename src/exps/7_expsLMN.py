@@ -47,9 +47,8 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =========================================================
-# Task type (STRICT: regression + binary only)
-# =========================================================
+
+# Task type
 def get_task_type(loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -59,9 +58,8 @@ def get_task_type(loader: Callable) -> str:
     return "regression" if loader in regression_tasks else "classification"
 
 
-# =========================================================
+
 # Dataset builder
-# =========================================================
 def build_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
     if task_type == "classification":
         y = ensure_binary_labels(y)
@@ -71,9 +69,8 @@ def build_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> Tensor
     return TensorDataset(X_t, y_t)
 
 
-# =========================================================
+
 # Random sampling in real data domain
-# =========================================================
 def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device: torch.device) -> torch.Tensor:
     rng = np.random.RandomState(seed)
     X_ref = np.asarray(X_ref)
@@ -88,9 +85,8 @@ def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device:
     return torch.FloatTensor(X_rand).to(device)
 
 
-# =========================================================
-# Safe monotonicity wrapper (no pollution)
-# =========================================================
+
+# Safe monotonicity wrapper
 def safe_monotonicity_check(
     model: nn.Module,
     optimizer,
@@ -116,9 +112,8 @@ def safe_monotonicity_check(
     return float(score)
 
 
-# =========================================================
+
 # Model
-# =========================================================
 def create_model(config: Dict, input_size: int, monotonic_indices, seed: int) -> nn.Module:
     torch.manual_seed(seed)
 
@@ -132,7 +127,7 @@ def create_model(config: Dict, input_size: int, monotonic_indices, seed: int) ->
         if 0 <= idx < input_size:
             monotone_constraints[idx] = 1
 
-    # ✅ IMPORTANT: output_activation ALWAYS Identity (regression raw output; clf logits)
+
     return LMNNetwork(
         input_size=input_size,
         hidden_sizes=hidden_sizes,
@@ -143,9 +138,8 @@ def create_model(config: Dict, input_size: int, monotonic_indices, seed: int) ->
     )
 
 
-# =========================================================
+
 # Training
-# =========================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -193,9 +187,8 @@ def train_model(model, optimizer, train_loader, val_loader, config: Dict, task_t
     return float(best_val)
 
 
-# =========================================================
-# Optuna objective (must match fold/split normalization)
-# =========================================================
+
+# Optuna objective
 def objective(trial, X_full: np.ndarray, y_full: np.ndarray, task_type: str, monotonic_indices):
 
     hidden_sizes_options = generate_layer_combinations(
@@ -212,7 +205,7 @@ def objective(trial, X_full: np.ndarray, y_full: np.ndarray, task_type: str, mon
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     set_global_seed(GLOBAL_SEED)
 
-    # fixed 80/20 split by seed
+
     n = len(X_full)
     idx = np.arange(n)
     rng = np.random.RandomState(GLOBAL_SEED)
@@ -225,7 +218,7 @@ def objective(trial, X_full: np.ndarray, y_full: np.ndarray, task_type: str, mon
     X_tr, X_va = X_full[tr_idx], X_full[va_idx]
     y_tr, y_va = y_full[tr_idx], y_full[va_idx]
 
-    # ✅ fold-like scaling in objective
+
     X_tr, X_va = fold_minmax_scale_X(X_tr, X_va)
     y_tr, y_va, _, _ = fold_standardize_y(y_tr, y_va, task_type)
 
@@ -263,9 +256,8 @@ def optimize_hyperparameters(X: np.ndarray, y: np.ndarray, task_type: str, monot
     return best
 
 
-# =========================================================
+
 # Cross validation
-# =========================================================
 def cross_validate(
     X: np.ndarray,
     y: np.ndarray,
@@ -295,7 +287,7 @@ def cross_validate(
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
 
-        # ✅ fold-based scaling/standardization (train stats only)
+
         X_train, X_val = fold_minmax_scale_X(X_train, X_val)
         y_train, y_val, y_mean, y_std = fold_standardize_y(y_train, y_val, task_type)
 
@@ -315,7 +307,7 @@ def cross_validate(
 
         train_model(model, optimizer, train_loader, val_loader, best_config, task_type, device)
 
-        # ---- performance metric ----
+        # performance metric
         if task_type == "regression":
             rmse_raw, nrmse = eval_regression_raw_metrics(model, val_loader, device, y_mean=y_mean, y_std=y_std)
             rmse_list.append(rmse_raw)
@@ -324,7 +316,7 @@ def cross_validate(
             err = eval_for_early_stop(model, val_loader, task_type, device)
             err_list.append(err)
 
-        # ---- monotonicity metric ----
+        # monotonicity metric
         if len(monotonic_indices) == 0:
             mono_metrics["random"].append(0.0)
             mono_metrics["train"].append(0.0)
@@ -356,7 +348,7 @@ def cross_validate(
             safe_monotonicity_check(model, optimizer, val_sample, monotonic_indices, device)
         )
 
-    # ---- compute avg mono here (UNIFIED) ----
+
     avg_mono = {
         k: (float(np.mean(v)), float(np.std(v)))
         for k, v in mono_metrics.items()
@@ -368,9 +360,8 @@ def cross_validate(
         return err_list, None, avg_mono, int(n_params or 0)
 
 
-# =========================================================
+
 # Main
-# =========================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -381,10 +372,10 @@ def main():
         load_lev, load_swd
     ]
 
-    # ✅ 确保文件名对应模型名称
+
     results_file = "exps_LMN.csv"
 
-    # 1. 写入符合要求的统一表头（删除了冗余的 NRMSE 重复列）
+
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -403,28 +394,27 @@ def main():
         task_type = get_task_type(loader)
         monotonic_indices = get_reordered_monotonic_indices(loader.__name__)
 
-        # 获取优化后的配置
+
         best_config = optimize_hyperparameters(X, y, task_type, monotonic_indices, n_trials=N_TRIALS)
 
-        # 交叉验证
-        # 返回顺序: scores, nrmse_scores, mono_metrics, n_params
+
         scores, nrmse_scores, mono_metrics, n_params = cross_validate(
             X, y, best_config, task_type, monotonic_indices, n_splits=N_SPLITS
         )
 
-        # 2. 核心逻辑分支：回归任务统一输出 NRMSE，分类输出 Error Rate
+
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 此时使用 nrmse_scores 的统计值作为主 Metric
+
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
             metric_name = "Error Rate"
-            # 分类任务使用错误率
+
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # 3. 调用统一后的写入函数（注意参数列表已简化）
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,
@@ -437,7 +427,7 @@ def main():
             mono_metrics=mono_metrics
         )
 
-        # 终端进度打印
+
         print(f"{loader.__name__} | {metric_name}: {final_mean:.4f} ± {final_std:.4f}")
 
 

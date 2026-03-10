@@ -1,5 +1,4 @@
-# My MonoNet implementation
-# InterpretableLayer and MonotonicLayer from https://github.com/phineasng/mononet, slightly modified
+# From https://github.com/phineasng/mononet, slightly modified
 
 import torch
 import torch.nn as nn

@@ -7,10 +7,8 @@ from functools import lru_cache
 from src.utils import init_weights
 
 
-# =====================================================
-# MonoDense
-# =====================================================
 
+# MonoDense
 class MonoDense(nn.Module):
 
     def __init__(
@@ -46,7 +44,6 @@ class MonoDense(nn.Module):
             units
         )
 
-        # 🔥 用 buffer，而不是 Parameter
         self.register_buffer("monotonicity_indicator", indicator)
 
         self.weight = nn.Parameter(torch.empty(units, in_features))
@@ -61,10 +58,7 @@ class MonoDense(nn.Module):
         init_weights(self.weight, method=self.init_method)
         init_weights(self.bias, method='zeros')
 
-    # =====================================================
     # Monotonicity indicator processing
-    # =====================================================
-
     @staticmethod
     def get_monotonicity_indicator(monotonicity_indicator, in_features, units):
 
@@ -86,10 +80,7 @@ class MonoDense(nn.Module):
 
         return indicator
 
-    # =====================================================
     # Activation
-    # =====================================================
-
     @staticmethod
     @lru_cache(None)
     def get_activation_functions(activation):
@@ -136,10 +127,7 @@ class MonoDense(nn.Module):
 
         return saturated
 
-    # =====================================================
     # Forward
-    # =====================================================
-
     def apply_monotonicity_indicator_to_kernel(self, kernel):
         abs_kernel = torch.abs(kernel)
         kernel = torch.where(self.monotonicity_indicator == 1, abs_kernel, kernel)
@@ -156,10 +144,7 @@ class MonoDense(nn.Module):
         return self.convex_activation(h)
 
 
-# =====================================================
 # ConstrainedMonotonicNeuralNetwork
-# =====================================================
-
 class ConstrainedMonotonicNeuralNetwork(nn.Module):
 
     def __init__(self,
@@ -193,7 +178,7 @@ class ConstrainedMonotonicNeuralNetwork(nn.Module):
                 f"must match input_size ({input_size})"
             )
 
-        # 🔥 用 buffer
+        # 用 buffer
         self.register_buffer("monotonicity_indicator", indicator)
 
         if architecture_type == 'type1':
@@ -204,10 +189,7 @@ class ConstrainedMonotonicNeuralNetwork(nn.Module):
         self.init_weights(init_method)
         self.to(device)
 
-    # =====================================================
     # Build
-    # =====================================================
-
     def _build_type1(self):
 
         layers = nn.ModuleList()
@@ -239,20 +221,14 @@ class ConstrainedMonotonicNeuralNetwork(nn.Module):
     def _build_type2(self):
         return self._build_type1()
 
-    # =====================================================
-    # Init
-    # =====================================================
-
+    # Initialization
     def init_weights(self, method):
         for module in self.modules():
             if isinstance(module, MonoDense):
                 init_weights(module.weight, method=method)
                 init_weights(module.bias, method='zeros')
 
-    # =====================================================
     # Forward
-    # =====================================================
-
     def forward(self, x):
         for layer in self.network:
             x = layer(x)

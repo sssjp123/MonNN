@@ -10,7 +10,7 @@ from sklearn.model_selection import KFold
 import optuna
 from schedulefree import AdamWScheduleFree
 
-# 从源文件导入带 MLP 辅助的网络类
+
 from src.MinMaxNetwork import MinMaxNetworkWithMLP, SmoothMinMaxNetworkWithMLP
 from dataPreprocessing.loaders import (
     load_abalone, load_auto_mpg, load_boston_housing,
@@ -39,9 +39,8 @@ SEARCH_EPOCHS = 20
 FINAL_EPOCHS = 100
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(data_loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -51,9 +50,6 @@ def get_task_type(data_loader: Callable) -> str:
     return "regression" if data_loader in regression_tasks else "classification"
 
 
-# =====================================================
-# Model Factory (对齐 MM 版本，调用 WithMLP 类)
-# =====================================================
 def create_model(
     config: Dict[str, Any],
     input_size: int,
@@ -71,7 +67,7 @@ def create_model(
             h_K=int(config["h_K"]),
             monotonic_indices=monotonic_indices,
             device=device,
-            aux_hidden_units=64, # 默认值
+            aux_hidden_units=64,
             use_sigmoid=False
         )
 
@@ -83,16 +79,14 @@ def create_model(
             monotonic_indices=monotonic_indices,
             beta=float(config["beta"]),
             device=device,
-            aux_hidden_units=64, # 默认值
+            aux_hidden_units=64,
             use_sigmoid=False
         )
 
     raise ValueError(f"Invalid model_type: {model_type}")
 
 
-# =====================================================
-# Training (完全对齐 MM 版本)
-# =====================================================
+# Training
 def train_model(
     model: nn.Module,
     optimizer,
@@ -144,9 +138,7 @@ def train_model(
     return float(best_val)
 
 
-# =====================================================
-# Monotonicity (完全对齐 MM 版本)
-# =====================================================
+# Monotonicity
 def sample_random_in_domain(
     X_ref: np.ndarray,
     n_points: int,
@@ -189,9 +181,7 @@ def safe_monotonicity_check(
     return float(score)
 
 
-# =====================================================
-# Optuna Objective (完全对齐 MM 版本)
-# =====================================================
+# Optuna Objective
 def objective(
     trial,
     X_full: np.ndarray,
@@ -284,9 +274,7 @@ def optimize(
     return best
 
 
-# =====================================================
-# Cross-validation (完全对齐 MM 版本)
-# =====================================================
+# Cross-validation
 def cross_validate(
     X: np.ndarray,
     y: np.ndarray,
@@ -396,9 +384,7 @@ def cross_validate(
     return err_list, None, avg_mono_metrics, int(n_params or 0)
 
 
-# =====================================================
-# Main (对齐 MM 版本，修改文件名为 MMaux/SMMaux)
-# =====================================================
+# Main
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -409,7 +395,7 @@ def main():
         load_lev, load_swd
     ]
 
-    # 修改映射，对应新的 CSV 文件名
+
     model_map = {
         "minmax": "exps_MMaux.csv",
         "smooth_minmax": "exps_SMMaux.csv"

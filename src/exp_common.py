@@ -1,4 +1,4 @@
-# src/exp_common.py
+# exp_common.py
 
 import random
 from typing import Tuple, Optional

@@ -40,9 +40,8 @@ SEARCH_EPOCHS = 20
 FINAL_EPOCHS = 100
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(data_loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -52,9 +51,7 @@ def get_task_type(data_loader: Callable) -> str:
     return "regression" if data_loader in regression_tasks else "classification"
 
 
-# =====================================================
-# Model Factory
-# =====================================================
+# Model
 def create_model(
     config: Dict[str, Any],
     input_size: int,
@@ -72,7 +69,7 @@ def create_model(
             h_K=int(config["h_K"]),
             monotonic_indices=monotonic_indices,
             device=device,
-            use_sigmoid=False  # ✅ always False
+            use_sigmoid=False
         )
 
     if model_type == "smooth_minmax":
@@ -83,15 +80,14 @@ def create_model(
             monotonic_indices=monotonic_indices,
             beta=float(config["beta"]),
             device=device,
-            use_sigmoid=False  # ✅ always False
+            use_sigmoid=False
         )
 
     raise ValueError(f"Invalid model_type: {model_type}")
 
 
-# =====================================================
+
 # Training
-# =====================================================
 def train_model(
     model: nn.Module,
     optimizer,
@@ -127,7 +123,6 @@ def train_model(
 
             optimizer.step(closure)
 
-        # scalar metric for early stop (RMSE on standardized y OR error rate)
         val_metric = eval_for_early_stop(model, val_loader, task_type, device)
 
         if val_metric < best_val:
@@ -144,9 +139,8 @@ def train_model(
     return float(best_val)
 
 
-# =====================================================
-# Monotonicity (safe, no state pollution)
-# =====================================================
+
+# Monotonicity
 def sample_random_in_domain(
     X_ref: np.ndarray,
     n_points: int,
@@ -181,7 +175,6 @@ def safe_monotonicity_check(
     finally:
         model.load_state_dict(model_state, strict=True)
         optimizer.load_state_dict(opt_state)
-        # move optimizer tensors back to device
         for state in optimizer.state.values():
             for k, v in state.items():
                 if torch.is_tensor(v):
@@ -190,9 +183,8 @@ def safe_monotonicity_check(
     return float(score)
 
 
-# =====================================================
-# Optuna Objective (fixed 80/20 split + fold scaling)
-# =====================================================
+
+# Optuna Objective
 def objective(
     trial,
     X_full: np.ndarray,
@@ -215,11 +207,9 @@ def objective(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     set_global_seed(GLOBAL_SEED)
 
-    # classification: enforce binary labels
     if task_type == "classification":
         y_full = ensure_binary_labels(y_full)
 
-    # fixed 80/20 split with GLOBAL_SEED
     n = len(X_full)
     idx = np.arange(n)
     rng = np.random.RandomState(GLOBAL_SEED)
@@ -232,7 +222,6 @@ def objective(
     X_tr, X_va = X_full[tr_idx], X_full[va_idx]
     y_tr, y_va = y_full[tr_idx], y_full[va_idx]
 
-    # fold-like scaling inside objective (no leakage)
     X_tr, X_va = fold_minmax_scale_X(X_tr, X_va)
     y_tr, y_va, _, _ = fold_standardize_y(y_tr, y_va, task_type)
 
@@ -288,9 +277,8 @@ def optimize(
     return best
 
 
-# =====================================================
+
 # Cross-validation
-# =====================================================
 def cross_validate(
     X: np.ndarray,
     y: np.ndarray,
@@ -368,7 +356,7 @@ def cross_validate(
             err = eval_for_early_stop(model, val_loader, task_type, device)
             err_list.append(float(err))
 
-        # monotonicity metrics (safe)
+        # monotonicity metrics
         if monotonic_indices is None or len(monotonic_indices) == 0:
             mono_collect["random"].append(0.0)
             mono_collect["train"].append(0.0)
@@ -403,9 +391,8 @@ def cross_validate(
     return err_list, None, avg_mono_metrics, int(n_params or 0)
 
 
-# =====================================================
+
 # Main
-# =====================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -416,7 +403,7 @@ def main():
         load_lev, load_swd
     ]
 
-    # 定义模型类型与对应的文件名映射
+
     model_map = {
         "minmax": "exps_MM.csv",
         "smooth_minmax": "exps_SMM.csv"
@@ -424,7 +411,6 @@ def main():
 
     for model_type, results_file in model_map.items():
 
-        # 1. 写入统一的表头
         with open(results_file, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -443,7 +429,6 @@ def main():
             task_type = get_task_type(loader)
             monotonic_indices = get_reordered_monotonic_indices(loader.__name__)
 
-            # 运行优化
             best_config = optimize(
                 X=X, y=y,
                 task_type=task_type,
@@ -451,8 +436,6 @@ def main():
                 model_type=model_type
             )
 
-            # 运行交叉验证
-            # 注意返回值顺序: rmse_list, nrmse_list, avg_mono_metrics, n_params
             scores, nrmse_scores, mono_metrics, n_params = cross_validate(
                 X=X, y=y,
                 best_config=best_config,
@@ -461,19 +444,16 @@ def main():
                 model_type=model_type
             )
 
-            # 2. 核心逻辑分支：回归输出 NRMSE，分类输出 Error Rate
+
             if task_type == "regression":
                 metric_name = "NRMSE"
-                # 直接取 NRMSE 的统计值
                 final_mean = float(np.mean(nrmse_scores))
                 final_std = float(np.std(nrmse_scores))
             else:
                 metric_name = "Error Rate"
-                # 取分类错误率的统计值
                 final_mean = float(np.mean(scores))
                 final_std = float(np.std(scores))
 
-            # 3. 调用修改后的写入函数（删除冗余的 nrmse_mean/std 参数）
             write_results_to_csv(
                 filename=results_file,
                 dataset_name=loader.__name__,

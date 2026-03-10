@@ -10,22 +10,17 @@ import matplotlib.pyplot as plt
 from scikit_posthocs import critical_difference_diagram
 import seaborn as sns
 
-# =====================================================
-# 全局设置：字体、路径与警告过滤
-# =====================================================
+
+# Gloal Matplotlib settings
 plt.rcParams['font.family'] = 'serif'
 plt.rcParams['font.serif'] = ['Times New Roman']
 plt.rcParams['axes.unicode_minus'] = False
 
-# 获取当前脚本所在目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 warnings.filterwarnings("ignore", category=UserWarning, module="scipy.stats")
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
-# =====================================================
-# 1. 修改后的读取逻辑：适配分散的 Lambda 文件
-# =====================================================
 def read_csv_files(file_list, directory):
     data_dict = {}
     methods_to_process = {
@@ -53,9 +48,6 @@ def read_csv_files(file_list, directory):
     return data_dict
 
 
-# =====================================================
-# 2. 数据处理辅助函数
-# =====================================================
 def safe_float_convert(value):
     try:
         return float(value)
@@ -99,9 +91,7 @@ def create_mono_dfs(data_dict):
     return {metric: pd.DataFrame(data) for metric, data in mono_data.items()}
 
 
-# =====================================================
-# 3. LaTeX 表格生成逻辑 (Step 2 核心)
-# =====================================================
+# LaTeX
 def format_value_with_std(value, std, include_std=True):
     if pd.isna(value): return "N/A"
     if include_std: return f"{value:.4f} $\\pm$ {std:.4f}"
@@ -168,9 +158,8 @@ def bold_min_value(df, method, value):
         return value
 
 
-# =====================================================
-# 4. 统计检验与支配分析 (核心复现逻辑)
-# =====================================================
+
+# Statistical test
 def is_pareto_efficient(costs):
     is_efficient = np.ones(costs.shape[0], dtype=bool)
     for i, c in enumerate(costs):
@@ -187,7 +176,6 @@ def dominance_analysis(df, methods, datasets, weights):
 
     for dataset in datasets:
         for weight in valid_weights:
-            # 关键点：排除 MLP，仅在具有相同 lambda 的正则化方法间对比
             curr = df[(df['Dataset'] == dataset) & (df['Weight'] == weight) & (df['Method'] != 'expsMLP')]
             if not curr.empty:
                 costs = curr[['Performance', 'Monotonicity']].values
@@ -228,9 +216,8 @@ def pretty_label(method: str) -> str:
     # Fallback: just remove leading 'exps' if exists
     return METHOD_LABEL_MAP.get(method, method.replace("exps", "", 1))
 
-# =====================================================
-# 5. 绘图逻辑 (Times New Roman & 本地保存)
-# =====================================================
+
+# plotting
 def plot_performance_monotonicity_tradeoff(performance_df, mono_df):
     combined_df = pd.merge(performance_df, mono_df, on=['Dataset', 'Method', 'Weight'])
     combined_df = combined_df.rename(columns={'Metric Value_x': 'Performance', 'Metric Value_y': 'Monotonicity'})
@@ -273,13 +260,12 @@ def plot_combined_regularization_impact(performance_df, mono_dfs, chosen_dataset
     plt.show()
 
 
-# =====================================================
-# 6. Main 主函数
-# =====================================================
+
+# Main
 def main():
     csv_directory = r'D:\PythonCode\PaperCode\MonNN\src\exps'
 
-    print("--- Step 1: 读取并合并 Lambda 汇总 CSV 文件 ---")
+    print("--- Step 1: read CSV ---")
     data_dict = read_csv_files([], csv_directory)
     if not data_dict:
         print("Error: No CSV files found!");
@@ -288,10 +274,10 @@ def main():
     performance_df = create_performance_df(data_dict)
     mono_dfs = create_mono_dfs(data_dict)
 
-    print("\n--- Step 2: 生成 Performance LaTeX 表格 ---")
+    print("\n--- Step 2: LaTeX table ---")
     print(df_to_latex(performance_df, "Performance Metrics", "tab:perf", bold_min_value))
 
-    print("\n--- Step 3: 支配分析 (MLP 锁定为 0.00%) ---")
+    print("\n--- Step 3: Domination Analysis ---")
     for metric, df in mono_dfs.items():
         combined_df = pd.merge(performance_df, df, on=['Dataset', 'Method', 'Weight'])
         combined_df = combined_df.rename(columns={'Metric Value_x': 'Performance', 'Metric Value_y': 'Monotonicity'})
@@ -301,16 +287,16 @@ def main():
         print(f"\nDominance Analysis for {metric}:")
         for m, p in results.items(): print(f"{m}: {p:.2f}% Pareto-optimal")
 
-    print("\n--- Step 4: 统计检验 ---")
+    print("\n--- Step 4: Statistical test ---")
     perform_statistical_tests(performance_df, "Performance Metrics")
 
-    print("\n--- Step 5: 绘图完成并保存本地 ---")
+    print("\n--- Step 5: Finish ---")
     if not performance_df.empty:
         example_ds = performance_df['Dataset'].unique()[0]
         plot_combined_regularization_impact(performance_df, mono_dfs, example_ds)
         plot_performance_monotonicity_tradeoff(performance_df, list(mono_dfs.values())[0])
 
-    print(f"\n任务结束。图片已保存至: {BASE_DIR}")
+    print(f"\nfig in: {BASE_DIR}")
 
 
 if __name__ == "__main__":

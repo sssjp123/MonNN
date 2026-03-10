@@ -47,9 +47,7 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
 # Task Type
-# =====================================================
 def get_task_type(loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -59,9 +57,7 @@ def get_task_type(loader: Callable) -> str:
     return "regression" if loader in regression_tasks else "classification"
 
 
-# =====================================================
 # Dataset builder
-# =====================================================
 def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
     if task_type == "classification":
         y = ensure_binary_labels(y)
@@ -71,9 +67,7 @@ def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorD
     return TensorDataset(X_t, y_t)
 
 
-# =====================================================
-# Random sampling for monotonicity check (in domain)
-# =====================================================
+# Random sampling for monotonicity check
 def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device: torch.device) -> torch.Tensor:
     rng = np.random.RandomState(seed)
     X_ref = np.asarray(X_ref)
@@ -88,9 +82,7 @@ def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device:
     return torch.FloatTensor(X_rand).to(device)
 
 
-# =====================================================
-# Safe monotonicity wrapper (no pollution)
-# =====================================================
+# Safe monotonicity
 def safe_monotonicity_check(
     model: nn.Module,
     optimizer,
@@ -114,9 +106,7 @@ def safe_monotonicity_check(
     return float(score)
 
 
-# =====================================================
-# Model factory
-# =====================================================
+# Model
 def create_model(
     config: Dict[str, Any],
     input_size: int,
@@ -145,9 +135,7 @@ def create_model(
     )
 
 
-# =====================================================
 # Training
-# =====================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -204,9 +192,7 @@ def train_model(
     return float(best_val)
 
 
-# =====================================================
 # Optuna objective
-# =====================================================
 def objective(
     trial,
     X_full: np.ndarray,
@@ -308,9 +294,7 @@ def optimize_hyperparameters(
     return best
 
 
-# =====================================================
 # Cross validation
-# =====================================================
 def cross_validate(
     X: np.ndarray,
     y: np.ndarray,
@@ -424,9 +408,6 @@ def cross_validate(
     return err_list, None, avg_mono, int(n_params or 0)
 
 
-# =====================================================
-# Process one dataset
-# =====================================================
 def process_dataset(loader: Callable):
 
     X, y = loader()
@@ -447,9 +428,7 @@ def process_dataset(loader: Callable):
     return scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
 
 
-# =====================================================
 # Main
-# =====================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -460,10 +439,9 @@ def main():
         load_lev, load_swd
     ]
 
-    # 修改文件名以匹配模型名称
     results_file = "exps_HLL.csv"
 
-    # 1. 写入统一的精简版表头
+
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -478,23 +456,20 @@ def main():
     for loader in dataset_loaders:
         print(f"\nProcessing dataset: {loader.__name__} with HLL...")
 
-        # 获取实验结果
-        # 注意 HLL 的 process_dataset 返回顺序: scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
+
         scores, nrmse_scores, mono_metrics, best_config, n_params, task_type = process_dataset(loader)
 
-        # 2. 核心逻辑分支：根据任务类型选择最终输出的指标
+
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 统一使用 NRMSE 作为回归的主指标
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
             metric_name = "Error Rate"
-            # 分类任务使用错误率
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # 3. 调用统一后的写入函数（移除旧版冗余的 nrmse_mean/std 参数）
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,
@@ -507,7 +482,7 @@ def main():
             mono_metrics=mono_metrics
         )
 
-        # 终端打印输出
+
         print(f"{loader.__name__} | {metric_name}: {final_mean:.4f} ± {final_std:.4f}")
 
 

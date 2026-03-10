@@ -1,14 +1,10 @@
-# UMNNModel.py
-
 from typing import List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-# =========================================================
 # Positive Integrand Network g(x) >= 0
-# =========================================================
 class PositiveIntegrand(nn.Module):
     """
     1D integrand network producing non-negative outputs via softplus,
@@ -34,9 +30,6 @@ class PositiveIntegrand(nn.Module):
         return F.softplus(self.net(x))
 
 
-# =========================================================
-# 1D UMNN block: f(x) = ∫_0^x g(t) dt (numerical integration)
-# =========================================================
 class UMNN1D(nn.Module):
     """
     Numerically integrates a non-negative integrand to obtain a monotone function.
@@ -72,10 +65,6 @@ class UMNN1D(nn.Module):
         integral = g_vals.mean(dim=1) * x               # (B,1)
         return integral
 
-
-# =========================================================
-# Full UMNN model for mixed monotone + non-monotone features
-# =========================================================
 class UMNNModel(nn.Module):
     """
     Assumption (matches your loaders):

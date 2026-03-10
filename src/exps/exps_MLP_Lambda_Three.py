@@ -44,9 +44,8 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(data_loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -56,9 +55,8 @@ def get_task_type(data_loader: Callable) -> str:
     return "regression" if data_loader in regression_tasks else "classification"
 
 
-# =====================================================
+
 # Dataset builder
-# =====================================================
 def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
     if task_type == "classification":
         y = ensure_binary_labels(y)
@@ -68,9 +66,8 @@ def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorD
     return TensorDataset(X_t, y_t)
 
 
-# =====================================================
+
 # Model
-# =====================================================
 def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     torch.manual_seed(seed)
 
@@ -87,9 +84,7 @@ def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     )
 
 
-# =====================================================
-# Safe Monotonicity Wrapper
-# =====================================================
+# Monotonicity
 def sample_random_in_domain(X_ref, n_points, seed, device):
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -118,9 +113,7 @@ def safe_monotonicity_check(model, optimizer, data_tensor, monotonic_indices, de
     return float(score)
 
 
-# =====================================================
 # Training
-# =====================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -169,9 +162,7 @@ def train_model(model, optimizer, train_loader, val_loader,
     return best_val
 
 
-# =====================================================
 # Hyperparameter Optimization
-# =====================================================
 def objective(trial, X_full, y_full, task_type):
     hidden_sizes_options = generate_layer_combinations(
         min_layers=2,
@@ -250,9 +241,7 @@ def optimize_hyperparameters(X, y, task_type):
     return best
 
 
-# =====================================================
 # Cross Validation with 3-Way Monotonicity Sampling
-# =====================================================
 def cross_validate(X, y, best_config, task_type, monotonic_indices):
     if isinstance(best_config["hidden_sizes"], str):
         best_config["hidden_sizes"] = ast.literal_eval(best_config["hidden_sizes"])
@@ -265,7 +254,7 @@ def cross_validate(X, y, best_config, task_type, monotonic_indices):
     else:
         err_list = []
 
-    # 用于支持 Table 5.11, 5.12, 5.13 的三维指标采样
+
     mono_collect = {"random": [], "train": [], "val": []}
     n_params = None
 
@@ -303,7 +292,7 @@ def cross_validate(X, y, best_config, task_type, monotonic_indices):
 
         train_model(model, optimizer, train_loader, val_loader, best_config, task_type, device)
 
-        # 性能指标计算 [cite: 291, 292]
+
         if task_type == "regression":
             rmse, nrmse = eval_regression_raw_metrics(model, val_loader, device, y_mean, y_std)
             rmse_list.append(rmse)
@@ -312,7 +301,7 @@ def cross_validate(X, y, best_config, task_type, monotonic_indices):
             err = eval_for_early_stop(model, val_loader, task_type, device)
             err_list.append(err)
 
-        # ✅ 三维单调性采样逻辑实现 [cite: 297]
+
         if len(monotonic_indices) == 0:
             mono_collect["random"].append(0.0)
             mono_collect["train"].append(0.0)
@@ -324,12 +313,12 @@ def cross_validate(X, y, best_config, task_type, monotonic_indices):
             tr_s = rng.choice(len(X_train), n_points, replace=False)
             va_s = rng.choice(len(X_val), n_points, replace=False)
 
-            # 采样数据转换
+
             train_sample = torch.FloatTensor(X_train[tr_s]).to(device)
             val_sample = torch.FloatTensor(X_val[va_s]).to(device)
             rand_sample = sample_random_in_domain(X_train, n_points, GLOBAL_SEED + fold, device)
 
-            # 分别计算三类单调性违反率 [cite: 293, 297]
+
             mono_collect["random"].append(
                 safe_monotonicity_check(model, optimizer, rand_sample, monotonic_indices, device)
             )
@@ -340,7 +329,7 @@ def cross_validate(X, y, best_config, task_type, monotonic_indices):
                 safe_monotonicity_check(model, optimizer, val_sample, monotonic_indices, device)
             )
 
-    # 计算均值
+
     avg_mono = {k: (float(np.mean(v)), float(np.std(v))) for k, v in mono_collect.items()}
 
     if task_type == "regression":
@@ -349,9 +338,7 @@ def cross_validate(X, y, best_config, task_type, monotonic_indices):
         return err_list, None, avg_mono, n_params
 
 
-# =====================================================
 # Main
-# =====================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -380,17 +367,17 @@ def main():
             "mono": mono_metrics
         })
 
-    # ✅ 按照您的要求输出 3 个独立的单调性汇总 CSV 文件
+
     eval_types = ["random", "validation", "train"]
     for e_type in eval_types:
         filename = f"exps_MLP_lambda_{e_type}.csv"
         with open(filename, "w", newline="") as f:
             writer = csv.writer(f)
-            # 简化表头：仅输出数据集名称及其对应采样维度的单调性结果
+
             writer.writerow(["Dataset", "Metric", "MLP_Baseline"])
 
             for res in results_summary:
-                # 确定正确的字典 key（mono_metrics 中 validation 对应的 key 是 "val"）
+
                 key = "val" if e_type == "validation" else e_type
                 m_val = res["mono"][key][0]
                 writer.writerow([res["dataset"], e_type, f"{m_val:.4f}"])

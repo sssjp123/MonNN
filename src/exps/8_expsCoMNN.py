@@ -45,9 +45,8 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task type
-# =====================================================
 def get_task_type(loader: Callable) -> str:
     regression = [
         load_abalone, load_auto_mpg,
@@ -57,9 +56,8 @@ def get_task_type(loader: Callable) -> str:
     return "regression" if loader in regression else "classification"
 
 
-# =====================================================
+
 # Activation mapping
-# =====================================================
 def build_activation(name: str) -> nn.Module:
     name = name.lower()
     if name == "relu":
@@ -69,9 +67,8 @@ def build_activation(name: str) -> nn.Module:
     raise ValueError(f"Unsupported activation: {name}")
 
 
-# =====================================================
-# Model (🔥 no sigmoid for regression)
-# =====================================================
+
+# Model
 def create_model(
     config: Dict[str, Any],
     input_size: int,
@@ -95,7 +92,7 @@ def create_model(
         output_size=1,
         activation=activation,
         monotonicity_indicator=monotonic_indicator,
-        final_activation=nn.Identity(),   # ✅ 统一 Identity
+        final_activation=nn.Identity(),
         architecture_type="type2",
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
@@ -103,9 +100,8 @@ def create_model(
     return model
 
 
-# =====================================================
+
 # Train
-# =====================================================
 def train_model(model, optimizer, train_loader, val_loader, config, task_type, device):
 
     criterion = nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
@@ -150,9 +146,8 @@ def train_model(model, optimizer, train_loader, val_loader, config, task_type, d
     return best_val
 
 
-# =====================================================
-# Monotonicity (safe)
-# =====================================================
+
+# Monotonicity
 def sample_random_in_domain(X_ref, n_points, seed, device):
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -181,9 +176,8 @@ def safe_monotonicity_check(model, optimizer, data_tensor, monotonic_indices, de
     return float(score)
 
 
-# =====================================================
-# Optuna (🔥 fold-based z-score inside objective)
-# =====================================================
+
+# Optuna
 def objective(trial, X, y, task_type, monotonic_indicator):
 
     config = {
@@ -261,9 +255,8 @@ def optimize(X, y, task_type, monotonic_indicator):
     return best
 
 
-# =====================================================
-# Cross Validation (🔥 raw RMSE + NRMSE)
-# =====================================================
+
+# Cross Validation
 def cross_validate(X, y, config, task_type,
                    monotonic_indicator, monotonic_indices):
 
@@ -366,13 +359,12 @@ def cross_validate(X, y, config, task_type,
         return err_list, None, avg_mono, n_params
 
 
-# =====================================================
-# Main (🔥 CSV aligned)
-# =====================================================
+
+# Main
 def main():
     set_global_seed(GLOBAL_SEED)
 
-    # ✅ 确保文件名对应模型名称
+
     results_file = "exps_CoMNN.csv"
 
     dataset_loaders = [
@@ -382,7 +374,7 @@ def main():
         load_lev, load_swd
     ]
 
-    # 1. 写入统一的表头（移除冗余列）
+
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -403,29 +395,27 @@ def main():
         monotonic_indices = get_reordered_monotonic_indices(loader.__name__)
         monotonic_indicator = create_monotonicity_indicator(monotonic_indices, X.shape[1])
 
-        # 超参数优化
         best_config = optimize(X, y, task_type, monotonic_indicator)
 
-        # 交叉验证
-        # 返回顺序: scores(RMSE/Err), nrmse_scores, mono_metrics, n_params
+
         scores, nrmse_scores, mono_metrics, n_params = cross_validate(
             X, y, best_config, task_type,
             monotonic_indicator, monotonic_indices
         )
 
-        # 2. 核心逻辑分支：回归任务统一输出 NRMSE，分类输出 Error Rate
+
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 使用 NRMSE 的统计值作为主 Metric
+
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
             metric_name = "Error Rate"
-            # 分类任务使用错误率
+
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # 3. 调用统一后的写入函数（注意参数已根据新的 utils.py 简化）
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,
@@ -438,7 +428,7 @@ def main():
             mono_metrics=mono_metrics
         )
 
-        # 终端进度打印
+
         print(f"{loader.__name__} | {metric_name}: {final_mean:.4f} ± {final_std:.4f}")
 
 

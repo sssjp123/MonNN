@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from scikit_posthocs import critical_difference_diagram
 import ast
 
-# 读取 CSV 文件并进行数据清理
+
 def read_csv_files(file_list, directory):
     data_dict = {}
     for file in file_list:
@@ -15,22 +15,21 @@ def read_csv_files(file_list, directory):
         full_path = os.path.join(directory, file)
         df = pd.read_csv(full_path)
 
-        # 清理数据：将所有的 '--' 替换为 NaN
+
         df.replace('--', np.nan, inplace=True)
 
-        # 将 NaN 转换为数字
+
         df = df.apply(pd.to_numeric, errors='ignore')
 
         data_dict[method_name] = df
     return data_dict
 
-# 创建性能数据框
+
 def create_performance_df(data_dict):
     performance_data = {}
     performance_std_data = {}
     for method, df in data_dict.items():
         if 'Metric Mean' in df.columns and 'Metric Std' in df.columns:
-            # 确保索引是 Dataset
             performance_data[method] = df.set_index('Dataset')['Metric Mean']
             performance_std_data[method] = df.set_index('Dataset')['Metric Std']
         else:
@@ -39,15 +38,12 @@ def create_performance_df(data_dict):
     performance_df = pd.DataFrame(performance_data)
     performance_std_df = pd.DataFrame(performance_std_data)
 
-    # 修改点：不再使用 dropna(axis=1)，而是填充 NaN 或保留，
-    # 否则只要 MM 有一个空值，整列 MM 都会被删掉
-    # 这里建议只对行进行处理（如果某个数据集在所有方法中都没有数据）
     performance_df = performance_df.dropna(axis=0, how='all')
     performance_std_df = performance_std_df.dropna(axis=0, how='all')
 
     return performance_df.sort_index(), performance_std_df.sort_index()
 
-# 创建参数数据框
+
 def create_params_df(data_dict):
     params_data = {}
     for method, df in data_dict.items():
@@ -55,7 +51,7 @@ def create_params_df(data_dict):
     params_df = pd.concat(params_data, axis=1)
     return params_df.sort_index()
 
-# 创建单调性数据框
+
 def create_mono_dfs(data_dict):
     mono_metrics = ['Mono Random', 'Mono Train', 'Mono Val']
     mono_dfs = {}
@@ -194,8 +190,7 @@ def main():
     performance_df, performance_std_df = create_performance_df(data_dict)
     params_df = create_params_df(data_dict)
 
-    # 打印检查，确保四列都在
-    print("參與分析的方法列表:", performance_df.columns.tolist())
+    print("Method List:", performance_df.columns.tolist())
 
     try:
         performance_latex = df_to_latex(performance_df, performance_std_df, "Performance Metrics", "tab:performance",
@@ -211,7 +206,6 @@ def main():
     print(f"Friedman test statistic: {chi2}")
     print(f"Friedman test p-value: {p_value}")
 
-    # --- 强制执行部分，删除了 if p_value < 0.05 ---
     print("\n[Mandatory Execution] Performing Wilcoxon signed-rank tests...")
     wilcoxon_results = perform_wilcoxon_tests(performance_df)
     print("Wilcoxon test results:")
@@ -222,7 +216,7 @@ def main():
     print("Nemenyi test results:")
     print(nemenyi_results)
 
-    # 转换为 LaTeX
+    # LaTeX
     wilcoxon_latex = create_latex_table(wilcoxon_results, "Wilcoxon Test Results", "tab:wilcoxon")
     nemenyi_latex = create_latex_table(nemenyi_results, "Nemenyi Test Results", "tab:nemenyi")
 
@@ -231,7 +225,7 @@ def main():
     print("\nNemenyi Test Results (LaTeX):")
     print(nemenyi_latex)
 
-    # 生成 CD 图
+    # CD
     try:
         create_critical_difference_diagram(performance_df, filename='CD_diagram.png')
     except Exception as e:

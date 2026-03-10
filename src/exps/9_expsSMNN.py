@@ -44,9 +44,8 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -56,16 +55,15 @@ def get_task_type(loader: Callable) -> str:
     return "regression" if loader in regression_tasks else "classification"
 
 
-# =====================================================
-# Model Wrapper (always Identity)
-# =====================================================
+
+# Model Wrapper
 class SMNNWrapper(nn.Module):
     def __init__(self, backbone: nn.Module):
         super().__init__()
         self.backbone = backbone
 
     def forward(self, x):
-        return self.backbone(x)  # raw output (regression raw / clf logits)
+        return self.backbone(x)
 
 
 def create_model(
@@ -86,9 +84,8 @@ def create_model(
     return SMNNWrapper(backbone)
 
 
-# =====================================================
-# Safe Monotonicity
-# =====================================================
+
+# Monotonicity
 def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device: torch.device) -> torch.Tensor:
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -116,9 +113,7 @@ def safe_monotonicity_check(model, optimizer, data_tensor, monotonic_indices, de
     return float(score)
 
 
-# =====================================================
 # Training
-# =====================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -174,9 +169,7 @@ def train_model(
     return float(best_val)
 
 
-# =====================================================
-# Optuna Objective (fixed 80/20 split + fold-style preprocessing)
-# =====================================================
+# Optuna Objective
 def objective(trial, X, y, task_type, monotonic_indices) -> float:
 
     config = {
@@ -193,7 +186,7 @@ def objective(trial, X, y, task_type, monotonic_indices) -> float:
     if task_type == "classification":
         y = ensure_binary_labels(y)
 
-    # fixed split (GLOBAL_SEED)
+
     n = len(X)
     idx = np.arange(n)
     rng = np.random.RandomState(GLOBAL_SEED)
@@ -237,9 +230,8 @@ def optimize(X, y, task_type, monotonic_indices) -> Dict[str, Any]:
     return best
 
 
-# =====================================================
-# Cross Validation (✅ generator + ✅ return avg_mono)
-# =====================================================
+
+# Cross Validation
 def cross_validate(
     X: np.ndarray,
     y: np.ndarray,
@@ -331,16 +323,12 @@ def cross_validate(
         return err_list, None, avg_mono, int(n_params or 0)
 
 
-# =====================================================
+
 # Main
-# =====================================================
-# =====================================================
-# Main
-# =====================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
-    # 1. 确保结果文件名对应模型
+
     results_file = "exps_SMNN.csv"
 
     dataset_loaders = [
@@ -350,7 +338,7 @@ def main():
         load_lev, load_swd
     ]
 
-    # 2. 写入统一的标准化表头
+
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -369,28 +357,27 @@ def main():
         task_type = get_task_type(loader)
         monotonic_indices = get_reordered_monotonic_indices(loader.__name__)
 
-        # 超参数搜索
+
         best_config = optimize(X, y, task_type, monotonic_indices)
 
-        # 交叉验证
-        # 返回顺序: scores (RMSE or ErrorRate), nrmse_scores, mono_metrics, n_params
+
         scores, nrmse_scores, mono_metrics, n_params = cross_validate(
             X, y, best_config, task_type, monotonic_indices
         )
 
-        # 3. 核心指标选择：回归任务主指标设为 NRMSE，分类设为 Error Rate
+
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 此时使用 nrmse_scores 的统计值
+
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
             metric_name = "Error Rate"
-            # 此时使用 scores (Error Rate) 的统计值
+
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # 4. 调用更新后的写入函数（参数列表已根据新版 utils.py 简化）
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,
@@ -403,7 +390,7 @@ def main():
             mono_metrics=mono_metrics
         )
 
-        # 终端进度打印
+
         print(f"{loader.__name__} | {metric_name}: {final_mean:.4f} ± {final_std:.4f}")
 
 if __name__ == "__main__":

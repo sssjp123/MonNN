@@ -48,9 +48,8 @@ PATIENCE = 10
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(data_loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -60,9 +59,6 @@ def get_task_type(data_loader: Callable) -> str:
     return "regression" if data_loader in regression_tasks else "classification"
 
 
-# =====================================================
-# Loader output unification: (X,y) OR (X,y,X_test,y_test)
-# =====================================================
 def load_full_data(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
     out = loader()
     if isinstance(out, tuple) and len(out) == 2:
@@ -76,9 +72,8 @@ def load_full_data(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
     raise ValueError(f"Unexpected loader output format from {loader.__name__}: len={len(out) if isinstance(out, tuple) else 'N/A'}")
 
 
-# =====================================================
+
 # Dataset builder
-# =====================================================
 def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
     if task_type == "classification":
         y = ensure_binary_labels(y)
@@ -88,9 +83,7 @@ def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorD
     return TensorDataset(X_t, y_t)
 
 
-# =====================================================
 # Model
-# =====================================================
 def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     torch.manual_seed(seed)
 
@@ -107,9 +100,8 @@ def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     )
 
 
-# =====================================================
-# Safe Monotonicity
-# =====================================================
+
+# Monotonicity
 def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device: torch.device) -> torch.Tensor:
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -142,9 +134,7 @@ def safe_monotonicity_check(model: nn.Module,
     return float(score)
 
 
-# =====================================================
 # Training
-# =====================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -207,9 +197,8 @@ def train_model(model: nn.Module,
     return float(best_val)
 
 
-# =====================================================
-# Hyperparameter Optimization (aligned with MLP)
-# =====================================================
+
+# Hyperparameter Optimization
 def objective(trial, X_full: np.ndarray, y_full: np.ndarray, task_type: str, monotonic_indices: List[int]) -> float:
     hidden_sizes_options = generate_layer_combinations(
         min_layers=2,
@@ -287,9 +276,8 @@ def optimize_hyperparameters(X: np.ndarray, y: np.ndarray, task_type: str, monot
     return best
 
 
-# =====================================================
-# Cross Validation (aligned with MLP)
-# =====================================================
+
+# Cross Validation
 def cross_validate(X: np.ndarray,
                    y: np.ndarray,
                    best_config: Dict,
@@ -356,7 +344,7 @@ def cross_validate(X: np.ndarray,
             err = eval_for_early_stop(model, val_loader, task_type, device)
             err_list.append(float(err))
 
-        # monotonicity evaluation aligned with MLP
+        # monotonicity evaluation
         if len(monotonic_indices) == 0:
             mono_collect["random"].append(0.0)
             mono_collect["train"].append(0.0)
@@ -390,9 +378,6 @@ def cross_validate(X: np.ndarray,
         return err_list, None, avg_mono, int(n_params)
 
 
-# =====================================================
-# Main
-# =====================================================
 def process_dataset(data_loader: Callable):
     X, y = load_full_data(data_loader)
     task_type = get_task_type(data_loader)
@@ -407,9 +392,8 @@ def process_dataset(data_loader: Callable):
     return scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
 
 
-# =====================================================
+
 # Main
-# =====================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -420,10 +404,10 @@ def main():
         load_lev, load_swd
     ]
 
-    # ✅ 修正为当前模型的文件名
+
     results_file = "exps_MixupPWL.csv"
 
-    # ✅ 1. 写入标准化后的表头 (移除冗余列)
+
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -438,22 +422,22 @@ def main():
     for loader in dataset_loaders:
         print(f"\nProcessing dataset: {loader.__name__} with MixupPWL...")
 
-        # 获取实验结果
+
         scores, nrmse_scores, mono_metrics, best_config, n_params, task_type = process_dataset(loader)
 
-        # ✅ 2. 核心逻辑分支：回归任务输出 NRMSE，分类输出 Error Rate
+
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 统一使用 nrmse_scores 的均值和标准差
+
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
             metric_name = "Error Rate"
-            # 分类任务使用 scores (Error Rate)
+
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # ✅ 3. 调用更新后的写入函数 (适配简化后的参数列表)
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,

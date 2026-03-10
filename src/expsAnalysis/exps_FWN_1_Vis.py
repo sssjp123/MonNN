@@ -10,9 +10,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 
-# =========================
 # Global plotting style
-# =========================
 mpl.rcParams["font.family"] = "Times New Roman"
 mpl.rcParams["font.size"] = 12
 mpl.rcParams["axes.unicode_minus"] = False
@@ -20,9 +18,7 @@ mpl.rcParams["pdf.fonttype"] = 42  # embed TrueType fonts
 mpl.rcParams["ps.fonttype"] = 42
 
 
-# =========================
-# Data IO & preparation
-# =========================
+
 def read_csv_files(file_list, directory):
     data_dict = {}
     for file in file_list:
@@ -54,7 +50,6 @@ def create_performance_df(data_dict):
     performance_df = pd.concat(performance_data, axis=1)
     performance_std_df = pd.concat(performance_std_data, axis=1)
 
-    # Drop columns that contain any NaN (keep only methods with complete results)
     performance_df = performance_df.dropna(axis=1, how="any")
     performance_std_df = performance_std_df.dropna(axis=1, how="any")
 
@@ -96,11 +91,6 @@ def create_mono_dfs(data_dict):
     return mono_dfs
 
 def prettify_method_names(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Paper-ready column names:
-    - remove leading 'exps_' if present
-    - rename 'WeightsConstrained' -> 'MLP$_{wc}$'
-    """
     rename_map = {}
     for c in df.columns:
         new_c = c
@@ -111,9 +101,7 @@ def prettify_method_names(df: pd.DataFrame) -> pd.DataFrame:
         rename_map[c] = new_c
     return df.rename(columns=rename_map)
 
-# =========================
-# LaTeX formatting helpers
-# =========================
+# LaTeX formatting functions
 def format_value_with_std(value, std):
     return f"{value:.4f} $\\pm$ {std:.4f}"
 
@@ -172,9 +160,7 @@ def create_latex_table(df, caption, label):
     return latex_table
 
 
-# =========================
 # Statistical tests
-# =========================
 def perform_wilcoxon_tests(df):
     methods = df.columns
     n_methods = len(methods)
@@ -214,9 +200,8 @@ def perform_nemenyi_test(df):
         return None
 
 
-# =========================
-# Average ranks + CD diagram
-# =========================
+
+# CD diagram
 def create_avg_rank_and_cd_diagram(
     performance_df,
     out_dir=None,
@@ -245,7 +230,7 @@ def create_avg_rank_and_cd_diagram(
     # Nemenyi significance matrix
     nemenyi_results = posthoc_nemenyi_friedman(performance_df)
 
-    # (A) Average ranks plot
+    # Average ranks plot
     fig, ax = plt.subplots(figsize=(8, 4.6))
     avg_ranks.plot(kind="bar", ax=ax)
     ax.set_ylabel("Average rank")
@@ -258,7 +243,7 @@ def create_avg_rank_and_cd_diagram(
     plt.savefig(rank_path, dpi=300, bbox_inches="tight")
     plt.close()
 
-    # (B) CD diagram
+    # CD diagram
     fig, ax = plt.subplots(figsize=(10, 4.8))
     critical_difference_diagram(
         ranks=ranks_dict,
@@ -280,9 +265,8 @@ def create_avg_rank_and_cd_diagram(
     return avg_ranks, nemenyi_results, str(rank_path), str(cd_path)
 
 
-# =========================
+
 # Main
-# =========================
 def main():
     csv_directory = r"D:\PythonCode\PaperCode\MonNN\src\exps"
     csv_files = [
@@ -301,19 +285,16 @@ def main():
 
     performance_df, performance_std_df = create_performance_df(data_dict)
     params_df = create_params_df(data_dict)
-    mono_dfs = create_mono_dfs(data_dict)  # keep if you need later
+    mono_dfs = create_mono_dfs(data_dict)
 
-    # ---- Paper-ready method names for plots/tables ----
     performance_df = prettify_method_names(performance_df)
     performance_std_df = prettify_method_names(performance_std_df)
     params_df = prettify_method_names(params_df)
 
-    # If you later plot mono_dfs, you can prettify them too (optional):
     mono_dfs = {k: (prettify_method_names(v[0]), prettify_method_names(v[1])) for k, v in mono_dfs.items()}
 
-    # -------------------------
+
     # LaTeX tables
-    # -------------------------
     try:
         performance_latex = df_to_latex(
             performance_df,
@@ -334,17 +315,15 @@ def main():
     except Exception as e:
         print(f"Error creating Parameters Table: {e}")
 
-    # -------------------------
+
     # Friedman test
-    # -------------------------
     print("Performing Friedman test...")
     chi2, p_value = perform_friedman_test(performance_df)
     print(f"Friedman test statistic: {chi2}")
     print(f"Friedman test p-value: {p_value}")
 
-    # -------------------------
-    # Average ranks + CD diagram
-    # -------------------------
+
+    # Average ranks and CD diagram
     try:
         avg_ranks, nemenyi_mat, rank_png, cd_png = create_avg_rank_and_cd_diagram(
             performance_df,
@@ -359,9 +338,8 @@ def main():
     except Exception as e:
         print(f"Error drawing rank/CD diagrams: {e}")
 
-    # -------------------------
+
     # Post-hoc tests (optional gate)
-    # -------------------------
     if p_value < 0.05:
         print("\nSignificant differences found. Performing Wilcoxon and Nemenyi tests...")
 

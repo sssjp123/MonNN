@@ -47,9 +47,8 @@ PATIENCE = 10
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Loader unification
-# =====================================================
 def load_full_dataset(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
     out = loader()
     if len(out) == 2:
@@ -82,9 +81,8 @@ def make_tensor_dataset(X, y, task_type):
     )
 
 
-# =====================================================
+
 # Model
-# =====================================================
 def create_model(config: Dict, input_size: int, seed: int):
     torch.manual_seed(seed)
 
@@ -101,9 +99,8 @@ def create_model(config: Dict, input_size: int, seed: int):
     )
 
 
-# =====================================================
-# Monotonicity safe wrapper
-# =====================================================
+
+# Monotonicity
 def sample_random_in_domain(X_ref, n_points, seed, device):
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -131,9 +128,8 @@ def safe_monotonicity_check(model, optimizer, data_tensor, mono_idx, device):
     return float(score)
 
 
-# =====================================================
+
 # Training
-# =====================================================
 def train_model(model, optimizer, train_loader, val_loader,
                 config, task_type, device, mono_idx):
 
@@ -190,9 +186,8 @@ def train_model(model, optimizer, train_loader, val_loader,
     return float(best_val)
 
 
-# =====================================================
+
 # Optuna (Lambda fixed by external loop)
-# =====================================================
 def objective(trial, X_full, y_full, task_type, mono_idx, current_lambda):
 
     hidden_options = generate_layer_combinations(2, 2, [8, 16, 32, 64])
@@ -201,7 +196,7 @@ def objective(trial, X_full, y_full, task_type, mono_idx, current_lambda):
         "lr": trial.suggest_float("lr", 1e-3, 1e-1, log=True),
         "hidden_sizes": trial.suggest_categorical("hidden_sizes", hidden_options),
         "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
-        "monotonicity_weight": current_lambda,  # ✅ Fixed Lambda from loop
+        "monotonicity_weight": current_lambda,  # Fixed Lambda from loop
         "offset": trial.suggest_float("offset", 0.0, 0.5, step=0.05),
         "epochs": SEARCH_EPOCHS,
     }
@@ -258,9 +253,8 @@ def optimize_hyperparameters(X, y, task_type, mono_idx, current_lambda):
     return best
 
 
-# =====================================================
+
 # Cross Validation
-# =====================================================
 def cross_validate(X, y, best_config, task_type, mono_idx):
 
     kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=GLOBAL_SEED)
@@ -345,9 +339,8 @@ def cross_validate(X, y, best_config, task_type, mono_idx):
         return err_list, None, avg_mono, n_params
 
 
-# =====================================================
+
 # Dataset Processor
-# =====================================================
 def process_dataset(loader: Callable, current_lambda):
     X, y = load_full_dataset(loader)
     task_type = get_task_type(loader)
@@ -362,9 +355,8 @@ def process_dataset(loader: Callable, current_lambda):
     return scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
 
 
-# =====================================================
-# Main (Lambda Sweep)
-# =====================================================
+
+# Main
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -375,14 +367,14 @@ def main():
         load_lev, load_swd
     ]
 
-    # 定义测试的 Lambda 列表
+
     lambda_list = [1.0, 10.0, 100.0, 1000.0, 10000.0]
 
     for idx, lambd in enumerate(lambda_list):
-        # ✅ 输出 5 个指定的 csv 文件
+
         results_file = f"exps_PWL_lambda_10.{idx}.csv"
 
-        # 写入表头，保持内容完全一致
+
         with open(results_file, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -399,10 +391,10 @@ def main():
         for loader in dataset_loaders:
             print(f"Processing dataset: {loader.__name__}")
 
-            # 获取实验结果
+
             scores, nrmse_scores, mono_metrics, best_config, n_params, task_type = process_dataset(loader, lambd)
 
-            # 回归用 NRMSE，分类用 Error Rate
+
             if task_type == "regression":
                 metric_name = "NRMSE"
                 final_mean = float(np.mean(nrmse_scores))
@@ -412,7 +404,7 @@ def main():
                 final_mean = float(np.mean(scores))
                 final_std = float(np.std(scores))
 
-            # 写入 CSV
+            # CSV
             write_results_to_csv(
                 filename=results_file,
                 dataset_name=loader.__name__,

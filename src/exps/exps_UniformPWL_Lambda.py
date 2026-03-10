@@ -48,9 +48,8 @@ PATIENCE = 10
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(data_loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -60,9 +59,8 @@ def get_task_type(data_loader: Callable) -> str:
     return "regression" if data_loader in regression_tasks else "classification"
 
 
-# =====================================================
-# Loader output unification: (X,y) OR (X,y,X_test,y_test)
-# =====================================================
+
+# Loader output unification
 def load_full_data(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
     out = loader()
     if isinstance(out, tuple) and len(out) == 2:
@@ -76,9 +74,8 @@ def load_full_data(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
     raise ValueError(f"Unexpected loader output format")
 
 
-# =====================================================
+
 # Dataset builder
-# =====================================================
 def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
     if task_type == "classification":
         y = ensure_binary_labels(y)
@@ -88,9 +85,7 @@ def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorD
     return TensorDataset(X_t, y_t)
 
 
-# =====================================================
 # Model
-# =====================================================
 def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     torch.manual_seed(seed)
 
@@ -98,7 +93,7 @@ def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     if isinstance(hidden_sizes, str):
         hidden_sizes = ast.literal_eval(hidden_sizes)
 
-    # 创建网络层
+
     layers = [
         nn.Linear(input_size, hidden_sizes[0]),
         nn.ReLU(),
@@ -106,14 +101,12 @@ def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
         nn.Linear(hidden_sizes[-1], 1)
     ]
 
-    # 使用CertifiedMonotonicNetwork类
-    model = CertifiedMonotonicNetwork(layers, n_monotonic_features=5)  # 保持原逻辑
+    # CertifiedMonotonicNetwork
+    model = CertifiedMonotonicNetwork(layers, n_monotonic_features=5)
     return model
 
 
-# =====================================================
-# Safe Monotonicity
-# =====================================================
+# Monotonicity
 def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device: torch.device) -> torch.Tensor:
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -146,9 +139,7 @@ def safe_monotonicity_check(model: nn.Module,
     return float(score)
 
 
-# =====================================================
 # Training
-# =====================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -212,9 +203,7 @@ def train_model(model: nn.Module,
     return float(best_val)
 
 
-# =====================================================
-# Optuna (Lambda fixed by external loop)
-# =====================================================
+# Optuna
 def objective(trial, X_full: np.ndarray, y_full: np.ndarray, task_type: str, monotonic_indices: List[int], current_lambda: float) -> float:
     hidden_sizes_options = generate_layer_combinations(
         min_layers=2,
@@ -226,7 +215,7 @@ def objective(trial, X_full: np.ndarray, y_full: np.ndarray, task_type: str, mon
         "lr": trial.suggest_float("lr", 1e-3, 1e-1, log=True),
         "hidden_sizes": trial.suggest_categorical("hidden_sizes", hidden_sizes_options),
         "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
-        "monotonicity_weight": current_lambda,  # ✅ Fixed Lambda from loop
+        "monotonicity_weight": current_lambda,
         "offset": trial.suggest_float("offset", 0.0, 0.5, step=0.05),
         "epochs": SEARCH_EPOCHS,
     }
@@ -296,9 +285,7 @@ def optimize_hyperparameters(X: np.ndarray, y: np.ndarray, task_type: str, monot
     return best
 
 
-# =====================================================
 # Cross Validation
-# =====================================================
 def cross_validate(X: np.ndarray,
                    y: np.ndarray,
                    best_config: Dict,
@@ -387,9 +374,8 @@ def cross_validate(X: np.ndarray,
         return err_list, None, avg_mono, int(n_params)
 
 
-# =====================================================
+
 # Dataset Processor
-# =====================================================
 def process_dataset(data_loader: Callable, current_lambda: float):
     X, y = load_full_data(data_loader)
     task_type = get_task_type(data_loader)
@@ -404,9 +390,7 @@ def process_dataset(data_loader: Callable, current_lambda: float):
     return scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
 
 
-# =====================================================
 # Main
-# =====================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -420,7 +404,7 @@ def main():
     lambda_list = [1.0, 10.0, 100.0, 1000.0, 10000.0]
 
     for idx, lambd in enumerate(lambda_list):
-        # ✅ 输出 5 个指定的 csv 文件
+        # five csv
         results_file = f"exps_UniformPWL_lambda_10.{idx}.csv"
 
         with open(results_file, "w", newline="") as f:

@@ -5,7 +5,7 @@ import gurobipy as gp
 from gurobipy import GRB
 from typing import List
 
-# 单调性正则化函数
+
 def uniformPWL_mono_reg(model: nn.Module, x: torch.Tensor, monotonic_indices: List[int], b: float = 0.2):
     x_m = x[:, monotonic_indices]
     x_m.requires_grad_(True)
@@ -21,7 +21,7 @@ def uniformPWL_mono_reg(model: nn.Module, x: torch.Tensor, monotonic_indices: Li
     return monotonicity_loss
 
 
-# 使用 Gurobi 进行单调性验证
+# Gurobi
 def certify_grad_with_gurobi(first_layer, second_layer, mono_feature_num, direction=None):
     mono_flag = True
     w1 = first_layer.weight.data.detach().cpu().numpy().astype('float64')
@@ -81,7 +81,6 @@ def certify_grad_with_gurobi(first_layer, second_layer, mono_feature_num, direct
     return mono_flag
 
 
-# 单调性检查函数
 def certify_monotonicity(model: 'CertifiedMonotonicNetwork'):
     mono_flag = True
     for i in range(0, len(model.main_network.layers) - 1):
@@ -93,12 +92,12 @@ def certify_monotonicity(model: 'CertifiedMonotonicNetwork'):
     return mono_flag
 
 
-# 定义CertifiedMonotonicNetwork类
+# CertifiedMonotonicNetwork
 class CertifiedMonotonicNetwork(nn.Module):
     def __init__(self, layers, n_monotonic_features):
         super(CertifiedMonotonicNetwork, self).__init__()
-        self.main_network = nn.Sequential(*layers)  # 将网络层按顺序排列
-        self.n_monotonic_features = n_monotonic_features  # 存储单调性特征的数量
+        self.main_network = nn.Sequential(*layers)
+        self.n_monotonic_features = n_monotonic_features
 
     def forward(self, x):
-        return self.main_network(x)  # 前向传播
+        return self.main_network(x)

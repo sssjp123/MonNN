@@ -47,9 +47,8 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -59,9 +58,8 @@ def get_task_type(loader: Callable) -> str:
     return "regression" if loader in regression_tasks else "classification"
 
 
-# =====================================================
-# Dataset builder
-# =====================================================
+
+# Dataset
 def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
     if task_type == "classification":
         y = ensure_binary_labels(y)
@@ -71,9 +69,8 @@ def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorD
     return TensorDataset(X_t, y_t)
 
 
-# =====================================================
-# Random sampling for monotonicity check (in domain)
-# =====================================================
+
+# Random sampling for monotonicity check
 def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device: torch.device) -> torch.Tensor:
     rng = np.random.RandomState(seed)
     X_ref = np.asarray(X_ref)
@@ -88,9 +85,8 @@ def sample_random_in_domain(X_ref: np.ndarray, n_points: int, seed: int, device:
     return torch.FloatTensor(X_rand).to(device)
 
 
-# =====================================================
-# Safe monotonicity wrapper (avoid polluting optimizer/model)
-# =====================================================
+
+# Safe monotonicity check that restores model and optimizer state after evaluation
 def safe_monotonicity_check(
     model: nn.Module,
     optimizer,
@@ -115,18 +111,16 @@ def safe_monotonicity_check(
     return float(score)
 
 
-# =====================================================
+
 # Device chooser with auto-fallback
-# =====================================================
 def pick_device(prefer_cuda: bool = True) -> torch.device:
     if prefer_cuda and torch.cuda.is_available():
         return torch.device("cuda")
     return torch.device("cpu")
 
 
-# =====================================================
-# Model factory
-# =====================================================
+
+# Model creation based on config and monotonic indices
 def create_model(
     config: Dict[str, Any],
     input_size: int,
@@ -159,9 +153,8 @@ def create_model(
     return model.to(device)
 
 
-# =====================================================
+
 # Training
-# =====================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -217,9 +210,7 @@ def train_model(
     return float(best_val)
 
 
-# =====================================================
-# GPU auto-fallback runner (objective/fold)
-# =====================================================
+# GPU auto-fallback runner
 def run_with_fallback(fn, prefer_cuda=True):
     device = pick_device(prefer_cuda=prefer_cuda)
     try:
@@ -239,9 +230,8 @@ def run_with_fallback(fn, prefer_cuda=True):
         raise
 
 
-# =====================================================
-# Optuna objective (fixed 80/20 split + fold-style preprocessing)
-# =====================================================
+
+# Optuna objective
 def objective(
     trial,
     X_full: np.ndarray,
@@ -349,9 +339,8 @@ def optimize_hyperparameters(
     return best
 
 
-# =====================================================
-# Cross validation (aligned with other methods)
-# =====================================================
+
+# Cross validation
 def cross_validate(
     X: np.ndarray,
     y: np.ndarray,
@@ -421,7 +410,7 @@ def cross_validate(
 
         train_model(model, optimizer, train_loader, val_loader, best_config, task_type, device)
 
-        # ---- performance ----
+        # performance
         if task_type == "regression":
             rmse_raw, nrmse = eval_regression_raw_metrics(model, val_loader, device, y_mean, y_std)
             rmse_list.append(float(rmse_raw))
@@ -430,7 +419,7 @@ def cross_validate(
             err = eval_for_early_stop(model, val_loader, task_type, device)
             err_list.append(float(err))
 
-        # ---- monotonicity ----
+        # monotonicity
         if not monotonic_indices:
             mono_collect["random"].append(0.0)
             mono_collect["train"].append(0.0)
@@ -438,7 +427,6 @@ def cross_validate(
         else:
             n_points = min(MAX_MONO_POINTS, len(X_train), len(X_val))
 
-            # 你要求的：如果 n_points <= 1 直接跳过
             if n_points <= 1:
                 continue
 
@@ -468,9 +456,6 @@ def cross_validate(
     return err_list, None, avg_mono, int(n_params or 0)
 
 
-# =====================================================
-# Main
-# =====================================================
 def process_dataset(loader: Callable):
     X, y = loader()
     task_type = get_task_type(loader)
@@ -495,10 +480,9 @@ def main():
         load_lev, load_swd
     ]
 
-    # ✅ 确保文件名对应模型
     results_file = "exps_UMNN.csv"
 
-    # 1. 写入符合要求的统一表头
+
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -513,23 +497,20 @@ def main():
     for loader in dataset_loaders:
         print(f"\nProcessing dataset: {loader.__name__} with UMNN...")
 
-        # 获取实验结果
-        # UMNN 的 process_dataset 返回顺序: scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
+
         scores, nrmse_scores, mono_metrics, best_config, n_params, task_type = process_dataset(loader)
 
-        # 2. 核心逻辑分支：根据任务类型选择最终输出的指标
+
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 统一使用 NRMSE 作为回归的主指标
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
             metric_name = "Error Rate"
-            # 分类任务使用错误率
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # 3. 调用统一后的写入函数（参数列表已根据新的 utils.py 简化）
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,
@@ -542,7 +523,7 @@ def main():
             mono_metrics=mono_metrics
         )
 
-        # 终端实时查看进度
+
         print(f"{loader.__name__} | {metric_name}: {final_mean:.4f} ± {final_std:.4f}")
 
 

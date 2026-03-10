@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from scikit_posthocs import critical_difference_diagram
 import ast
 
-# 读取 CSV 文件并进行数据清理
+
 def read_csv_files(file_list, directory):
     data_dict = {}
     for file in file_list:
@@ -15,16 +15,14 @@ def read_csv_files(file_list, directory):
         full_path = os.path.join(directory, file)
         df = pd.read_csv(full_path)
 
-        # 清理数据：将所有的 '--' 替换为 NaN
         df.replace('--', np.nan, inplace=True)
 
-        # 将 NaN 转换为数字
         df = df.apply(pd.to_numeric, errors='ignore')
 
         data_dict[method_name] = df
     return data_dict
 
-# 创建性能数据框
+
 def create_performance_df(data_dict):
     performance_data = {}
     performance_std_data = {}
@@ -38,13 +36,12 @@ def create_performance_df(data_dict):
     performance_df = pd.concat(performance_data, axis=1)
     performance_std_df = pd.concat(performance_std_data, axis=1)
 
-    # 删除包含 NaN 的列
     performance_df = performance_df.dropna(axis=1, how='any')
     performance_std_df = performance_std_df.dropna(axis=1, how='any')
 
     return performance_df.sort_index(), performance_std_df.sort_index()
 
-# 创建参数数据框
+
 def create_params_df(data_dict):
     params_data = {}
     for method, df in data_dict.items():
@@ -52,7 +49,7 @@ def create_params_df(data_dict):
     params_df = pd.concat(params_data, axis=1)
     return params_df.sort_index()
 
-# 创建单调性数据框
+
 def create_mono_dfs(data_dict):
     mono_metrics = ['Mono Random', 'Mono Train', 'Mono Val']
     mono_dfs = {}
@@ -188,7 +185,7 @@ def main():
     data_dict = read_csv_files(csv_files, csv_directory)
 
     performance_df, performance_std_df = create_performance_df(data_dict)
-    params_df = create_params_df(data_dict)  # 确保这个函数被定义
+    params_df = create_params_df(data_dict)
     mono_dfs = create_mono_dfs(data_dict)
 
     try:

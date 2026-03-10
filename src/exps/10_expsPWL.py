@@ -47,9 +47,8 @@ PATIENCE = 10
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Loader unification
-# =====================================================
 def load_full_dataset(loader: Callable) -> Tuple[np.ndarray, np.ndarray]:
     out = loader()
     if len(out) == 2:
@@ -82,9 +81,8 @@ def make_tensor_dataset(X, y, task_type):
     )
 
 
-# =====================================================
+
 # Model
-# =====================================================
 def create_model(config: Dict, input_size: int, seed: int):
     torch.manual_seed(seed)
 
@@ -101,9 +99,8 @@ def create_model(config: Dict, input_size: int, seed: int):
     )
 
 
-# =====================================================
-# Monotonicity safe wrapper
-# =====================================================
+
+# Monotonicity
 def sample_random_in_domain(X_ref, n_points, seed, device):
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -131,9 +128,8 @@ def safe_monotonicity_check(model, optimizer, data_tensor, mono_idx, device):
     return float(score)
 
 
-# =====================================================
+
 # Training
-# =====================================================
 def train_model(model, optimizer, train_loader, val_loader,
                 config, task_type, device, mono_idx):
 
@@ -161,12 +157,12 @@ def train_model(model, optimizer, train_loader, val_loader,
                 if len(mono_idx) == 0:
                     mono_loss = torch.zeros((), device=device)
                 else:
-                    # 使用配置中的 offset 值
+
                     mono_loss = pwl_mono_reg(
                         model,
                         Xb,
                         mono_idx,
-                        float(config["offset"])  # 这里使用 config["offset"]
+                        float(config["offset"])
                     )
 
                 loss = empirical + float(config["monotonicity_weight"]) * mono_loss
@@ -191,10 +187,8 @@ def train_model(model, optimizer, train_loader, val_loader,
     return float(best_val)
 
 
-# =====================================================
+
 # Optuna
-# =====================================================
-# 修改 objective 函数中的配置字典，确保包含 offset 默认值
 def objective(trial, X_full, y_full, task_type, mono_idx):
 
     hidden_options = generate_layer_combinations(2, 2, [8, 16, 32, 64])
@@ -204,11 +198,11 @@ def objective(trial, X_full, y_full, task_type, mono_idx):
         "hidden_sizes": trial.suggest_categorical("hidden_sizes", hidden_options),
         "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
         "monotonicity_weight": trial.suggest_categorical("monotonicity_weight", [1., 10., 100., 1000.]),
-        "offset": trial.suggest_float("offset", 0.0, 0.5, step=0.05),  # 使用 optuna 选择 offset 值
+        "offset": trial.suggest_float("offset", 0.0, 0.5, step=0.05),
         "epochs": SEARCH_EPOCHS,
     }
 
-    # 其他代码保持不变
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     set_global_seed(GLOBAL_SEED)
 
@@ -260,9 +254,8 @@ def optimize_hyperparameters(X, y, task_type, mono_idx):
     return best
 
 
-# =====================================================
-# Cross Validation (FULLY UNIFIED)
-# =====================================================
+
+# Cross Validation
 def cross_validate(X, y, best_config, task_type, mono_idx):
 
     kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=GLOBAL_SEED)
@@ -347,9 +340,7 @@ def cross_validate(X, y, best_config, task_type, mono_idx):
         return err_list, None, avg_mono, n_params
 
 
-# =====================================================
 # Dataset Processor
-# =====================================================
 def process_dataset(loader: Callable):
     X, y = load_full_dataset(loader)
     task_type = get_task_type(loader)
@@ -364,13 +355,11 @@ def process_dataset(loader: Callable):
     return scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
 
 
-# =====================================================
 # Main
-# =====================================================
 def main():
     set_global_seed(GLOBAL_SEED)
 
-    # ✅ 1. 保留 9 个核心数据集
+
     dataset_loaders = [
         load_abalone, load_auto_mpg,
         load_boston_housing, load_compas,
@@ -378,10 +367,10 @@ def main():
         load_lev, load_swd
     ]
 
-    # ✅ 2. 结果文件名
+
     results_file = "exps_PWL.csv"
 
-    # ✅ 3. 写入统一表头
+
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -396,10 +385,10 @@ def main():
     for loader in dataset_loaders:
         print(f"\nProcessing dataset: {loader.__name__} with PWL Regularization...")
 
-        # 获取实验结果
+
         scores, nrmse_scores, mono_metrics, best_config, n_params, task_type = process_dataset(loader)
 
-        # ✅ 4. 回归用 NRMSE，分类用 Error Rate
+
         if task_type == "regression":
             metric_name = "NRMSE"
             final_mean = float(np.mean(nrmse_scores))
@@ -409,7 +398,7 @@ def main():
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # ✅ 5. 写入 CSV
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,

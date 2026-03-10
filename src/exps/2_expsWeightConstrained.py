@@ -44,9 +44,8 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -56,9 +55,8 @@ def get_task_type(loader: Callable) -> str:
     return "regression" if loader in regression_tasks else "classification"
 
 
-# =====================================================
+
 # Model
-# =====================================================
 def create_model(config, input_size, seed):
     torch.manual_seed(seed)
 
@@ -73,9 +71,8 @@ def create_model(config, input_size, seed):
     )
 
 
-# =====================================================
-# Safe Monotonicity
-# =====================================================
+
+# Safe Monotonicity Check
 def sample_random_in_domain(X_ref, n_points, seed, device):
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -104,9 +101,8 @@ def safe_monotonicity_check(model, optimizer, data_tensor, monotonic_indices, de
     return float(score)
 
 
-# =====================================================
+
 # Training
-# =====================================================
 def train_model(model, optimizer, train_loader, val_loader,
                 config, task_type, device):
 
@@ -151,9 +147,8 @@ def train_model(model, optimizer, train_loader, val_loader,
     return best_val
 
 
-# =====================================================
+
 # Optuna
-# =====================================================
 def objective(trial, X, y, task_type, monotonic_indices):
 
     hidden_options = generate_layer_combinations(2, 2, [8, 16, 32, 64])
@@ -228,9 +223,8 @@ def optimize(X, y, task_type, monotonic_indices):
     return best
 
 
-# =====================================================
-# Cross Validation (🔥 统一返回 avg_mono)
-# =====================================================
+
+# Cross Validation (return avg_mono)
 def cross_validate(X, y, config, task_type, monotonic_indices):
 
     if task_type == "classification":
@@ -328,15 +322,12 @@ def cross_validate(X, y, config, task_type, monotonic_indices):
         return err_list, None, avg_mono, n_params
 
 
-# =====================================================
-# Main
-# =====================================================
 def process_dataset(loader):
 
     X, y = loader()
     task_type = get_task_type(loader)
 
-    # WeightConstrained 是全局单调模型
+    # WeightConstrained
     monotonic_indices = list(range(X.shape[1]))
 
     best_config = optimize(X, y, task_type, monotonic_indices)
@@ -351,7 +342,6 @@ def process_dataset(loader):
 def main():
     set_global_seed(GLOBAL_SEED)
 
-    # 注意：文件名建议改为对应模型的名字
     results_file = "exps_WeightsConstrained.csv"
 
     dataset_loaders = [
@@ -361,7 +351,6 @@ def main():
         load_lev, load_swd
     ]
 
-    # 1. 写入符合要求的统一表头
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -374,23 +363,18 @@ def main():
         ])
 
     for loader in dataset_loaders:
-        # 获取实验结果
-        # 注意：此处变量顺序必须与 process_dataset 的 return 严格对应
+
         scores, nrmse_scores, best_config, mono_metrics, n_params, task_type = process_dataset(loader)
 
-        # 2. 核心逻辑分支：回归任务统一输出 NRMSE，分类输出 Error Rate
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 使用 nrmse_scores 的统计值
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
             metric_name = "Error Rate"
-            # 使用 scores (Error Rate) 的统计值
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # 3. 调用更新后的写入函数（参数需与 utils.py 中的定义一致）
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,

@@ -7,10 +7,7 @@ import torch
 from torch import nn
 
 
-# =========================================================
-# Monotonicity Check (Final Safe Version)
-# =========================================================
-
+# Monotonicity Check
 def monotonicity_check(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -27,7 +24,7 @@ def monotonicity_check(
     if not monotonic_indices:
         return 0.0
 
-    model.eval()  # ✅ safer than train()
+    model.eval()
 
     data_x = data_x.to(device)
     n_points = data_x.shape[0]
@@ -62,10 +59,7 @@ def monotonicity_check(
     return violations / n_points
 
 
-# =========================================================
 # Reordered Monotonic Indices
-# =========================================================
-
 def get_reordered_monotonic_indices(dataset_name: str) -> List[int]:
     dataset_name = dataset_name.replace("load_", "")
 
@@ -85,10 +79,7 @@ def get_reordered_monotonic_indices(dataset_name: str) -> List[int]:
     return list(range(num))
 
 
-# =========================================================
 # Monotonicity Indicator
-# =========================================================
-
 def create_monotonicity_indicator(
     monotonic_indices: List[int],
     input_size: int
@@ -103,10 +94,7 @@ def create_monotonicity_indicator(
     return indicator
 
 
-# =========================================================
 # Weight Initialization
-# =========================================================
-
 def init_weights(
     module_or_tensor: Union[nn.Module, torch.Tensor],
     method: Literal[
@@ -175,10 +163,7 @@ def init_weights(
         raise TypeError("Input must be nn.Module or torch.Tensor")
 
 
-# =========================================================
 # Positive Weight Transform
-# =========================================================
-
 def transform_weights(
     module_or_tensor: Union[nn.Module, torch.Tensor],
     method: Literal['exp', 'explin', 'sqr']
@@ -215,12 +200,7 @@ def transform_weights(
         raise TypeError("Input must be nn.Module or torch.Tensor")
 
 
-# =========================================================
-# CSV Writer
-# =========================================================
-
-# utils.py 中的修改部分
-
+# CSV
 def write_results_to_csv(
     filename: str,
     dataset_name: str,
@@ -232,18 +212,14 @@ def write_results_to_csv(
     best_config: Dict,
     mono_metrics: Dict
 ):
-    """
-    更新后的 CSV 写入函数：
-    1. 移除独立的 nrmse_mean/std 参数
-    2. 按照用户要求的顺序排列列
-    """
+
     best_config_str = json.dumps(best_config)
 
-    # 格式化指标数值
+
     m_mean = f"{metric_mean:.4f}" if isinstance(metric_mean, (int, float)) else metric_mean
     m_std = f"{metric_std:.4f}" if isinstance(metric_std, (int, float)) else metric_std
 
-    # 构造行数据，严格对应 main 中的表头
+
     row = [
         dataset_name,
         task_type,
@@ -254,7 +230,7 @@ def write_results_to_csv(
         best_config_str
     ]
 
-    # 添加单调性指标：Random, Train, Val
+
     for key in ['random', 'train', 'val']:
         mean, std = mono_metrics.get(key, (0.0, 0.0))
         row.extend([f"{mean:.4f}", f"{std:.4f}"])
@@ -264,10 +240,7 @@ def write_results_to_csv(
         writer.writerow(row)
 
 
-# =========================================================
 # Parameter Counter
-# =========================================================
-
 def count_parameters(module: nn.Module) -> int:
     return sum(
         p.numel() for p in module.parameters()
@@ -275,10 +248,7 @@ def count_parameters(module: nn.Module) -> int:
     )
 
 
-# =========================================================
 # Layer Combination Generator
-# =========================================================
-
 def generate_layer_combinations(
     min_layers=1,
     max_layers=3,

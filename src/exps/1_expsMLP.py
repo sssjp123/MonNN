@@ -44,9 +44,8 @@ N_SPLITS = 5
 MAX_MONO_POINTS = 1000
 
 
-# =====================================================
+
 # Task Type
-# =====================================================
 def get_task_type(data_loader: Callable) -> str:
     regression_tasks = [
         load_abalone, load_auto_mpg,
@@ -56,9 +55,7 @@ def get_task_type(data_loader: Callable) -> str:
     return "regression" if data_loader in regression_tasks else "classification"
 
 
-# =====================================================
 # Dataset builder
-# =====================================================
 def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorDataset:
     if task_type == "classification":
         y = ensure_binary_labels(y)
@@ -68,9 +65,7 @@ def make_tensor_dataset(X: np.ndarray, y: np.ndarray, task_type: str) -> TensorD
     return TensorDataset(X_t, y_t)
 
 
-# =====================================================
 # Model
-# =====================================================
 def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     torch.manual_seed(seed)
 
@@ -87,9 +82,8 @@ def create_model(config: Dict, input_size: int, seed: int) -> nn.Module:
     )
 
 
-# =====================================================
-# Safe Monotonicity
-# =====================================================
+
+# Safe Monotonicity Check
 def sample_random_in_domain(X_ref, n_points, seed, device):
     rng = np.random.RandomState(seed)
     x_min = np.nanmin(X_ref, axis=0)
@@ -118,9 +112,7 @@ def safe_monotonicity_check(model, optimizer, data_tensor, monotonic_indices, de
     return float(score)
 
 
-# =====================================================
 # Training
-# =====================================================
 def get_criterion(task_type: str):
     return nn.MSELoss() if task_type == "regression" else nn.BCEWithLogitsLoss()
 
@@ -170,9 +162,7 @@ def train_model(model, optimizer, train_loader, val_loader,
     return best_val
 
 
-# =====================================================
 # Hyperparameter Optimization
-# =====================================================
 def objective(trial, X_full, y_full, task_type):
 
     hidden_sizes_options = generate_layer_combinations(
@@ -252,9 +242,7 @@ def optimize_hyperparameters(X, y, task_type):
     return best
 
 
-# =====================================================
 # Cross Validation
-# =====================================================
 def cross_validate(X, y, best_config, task_type, monotonic_indices):
 
     if isinstance(best_config["hidden_sizes"], str):
@@ -346,9 +334,6 @@ def cross_validate(X, y, best_config, task_type, monotonic_indices):
         return err_list, None, avg_mono, n_params
 
 
-# =====================================================
-# Main
-# =====================================================
 def process_dataset(data_loader: Callable):
 
     X, y = data_loader()
@@ -364,8 +349,7 @@ def process_dataset(data_loader: Callable):
     return scores, nrmse_scores, mono_metrics, best_config, n_params, task_type
 
 
-# exps_MLP.py 中的 main 函数修改
-
+# main
 def main():
     set_global_seed(GLOBAL_SEED)
 
@@ -378,7 +362,7 @@ def main():
 
     results_file = "exps_MLP.csv"
 
-    # 1. 写入符合要求的表头
+    # 1. Write CSV header before processing datasets
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -391,14 +375,13 @@ def main():
         ])
 
     for loader in dataset_loaders:
-        # 获取实验结果
-        # scores 在回归中是 RMSE，在分类中是 Error Rate
+
         scores, nrmse_scores, mono_metrics, best_config, n_params, task_type = process_dataset(loader)
 
-        # 2. 核心逻辑分支：根据任务类型选择最终输出的指标
+        # 2. metric
         if task_type == "regression":
             metric_name = "NRMSE"
-            # 此时使用 nrmse_scores 而非原始 scores (RMSE)
+            # nrmse_scores
             final_mean = float(np.mean(nrmse_scores))
             final_std = float(np.std(nrmse_scores))
         else:
@@ -406,7 +389,7 @@ def main():
             final_mean = float(np.mean(scores))
             final_std = float(np.std(scores))
 
-        # 3. 调用修改后的写入函数
+
         write_results_to_csv(
             filename=results_file,
             dataset_name=loader.__name__,
