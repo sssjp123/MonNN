@@ -1,1 +1,6 @@
 /dataPreprocessing/preprocessed_data/
+
+# Python cache artifacts
+__pycache__/
+*.py[cod]
+
